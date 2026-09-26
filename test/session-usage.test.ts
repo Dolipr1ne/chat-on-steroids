@@ -289,7 +289,7 @@ describe('passive usage limits and canonical token totals', () => {
     expect(await usage.usageOverview()).toMatchObject({ contextTokenCap: 256_000, tokens: 128_000 });
     expect(store.readEvents).toHaveBeenCalledTimes(1);
   });
-  it.each([4, 5, 6, 7, 8])('rebuilds old cache version %i and reuses the corrected cache after restart', async (version) => {
+  it.each([4, 5, 6, 7, 8, 9])('rebuilds old cache version %i and reuses the corrected cache after restart', async (version) => {
     const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
     durable.readDurable.mockResolvedValue({ version, rows: [{ id: 'one', revision: `${timezone}:1:1:2000000`, days: [['2026-09-05', [{ model: 'gpt-6-pro', reasoningEffort: null, assumed: false, tokens: 1_000_000 }]]] }] });
     store.listUsageSessions.mockResolvedValue([{ id: 'one', updatedAt: 1, events: 1, estimatedTokens: 2_000_000 }]);
@@ -297,7 +297,7 @@ describe('passive usage limits and canonical token totals', () => {
     expect((await usage.usageOverview()).tokens).toBe(128_000);
     expect(store.readEvents).toHaveBeenCalledTimes(1);
     const persisted = durable.writeDurableSoon.mock.calls.at(-1)![1];
-    expect(persisted.version).toBe(9);
+    expect(persisted.version).toBe(10);
     vi.resetModules(); durable.readDurable.mockResolvedValue(persisted); store.readEvents.mockClear();
     usage = await import('../src/main/session/usage.js');
     expect((await usage.usageOverview()).tokens).toBe(128_000);
@@ -346,6 +346,34 @@ describe('model attribution and equivalent cost', () => {
   const call = (id: string, extra = {}) => ({ kind: 'tool_call', time: new Date(2026, 8, 5, 12).getTime(), call: { callId: id, conversationId: 'chat', args: { text: 'aaaa' }, result: { text: '' }, summary: { title: '' }, ...extra } });
   const message = (model?: string, reasoningEffort?: string, messageId = 'native') => ({ kind: 'user_message', time: now, messageId, message: { text: 'aaaa' }, ...(model ? { model } : {}), ...(reasoningEffort ? { reasoningEffort } : {}) });
   beforeEach(() => store.listUsageSessions.mockResolvedValue([{ id: 'one', updatedAt: 1, events: 10, estimatedTokens: 10 }]));
+  it('leaves missing model evidence unknown instead of inventing Sol, effort or cost', async () => {
+    store.readEvents.mockResolvedValue([message(), call('a')]);
+    const result = await usage.usageOverview();
+    expect(result.models).toEqual([{ model: 'unknown', reasoningEffort: null, assumed: true, tokens: 1 }]);
+    const { usageEstimate, DEFAULT_USAGE_FORMULA } = await import('../src/shared/usage.js');
+    expect(usageEstimate(result.models, DEFAULT_USAGE_FORMULA)).toEqual({ tokens: 1, cost: 0, unpricedTokens: 1 });
+  });
+  it('rebuilds a matching v9 Sol-assumed cache from history without modifying that history', async () => {
+    const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const history = [message(), call('a')];
+    const original = structuredClone(history);
+    durable.readDurable.mockResolvedValue({ version: 9, rows: [{ id: 'one', revision: `256000:${timezone}:1:10:10`,
+      days: [['2026-09-05', [{ model: 'gpt-5.6', reasoningEffort: 'high', assumed: true, tokens: 1 }]]], messages: [] }] });
+    store.readEvents.mockResolvedValue(history);
+    const result = await usage.usageOverview();
+    expect(store.readEvents).toHaveBeenCalledExactlyOnceWith('one');
+    expect(result.models).toEqual([{ model: 'unknown', reasoningEffort: null, assumed: true, tokens: 1 }]);
+    expect(history).toEqual(original);
+    expect(durable.writeDurableSoon.mock.calls.at(-1)![1].version).toBe(10);
+  });
+  it('never prices or displays an old assumed model as a recorded model, even with a saved rate', async () => {
+    const { usageEstimate, usageModelGroups, DEFAULT_USAGE_FORMULA } = await import('../src/shared/usage.js');
+    const rows = [{ model: 'gpt-5.6', reasoningEffort: 'high', assumed: true, tokens: 1e6 },
+      { model: 'gpt-6-pro', reasoningEffort: 'medium', assumed: false, tokens: 2e6 }];
+    expect(usageModelGroups(rows)[0]).toMatchObject({ model: 'unknown', reasoningEffort: null, assumed: true });
+    expect(usageEstimate(rows, { ...DEFAULT_USAGE_FORMULA, rates: { 'gpt-5.6': 100, 'gpt-6-pro': 1, unknown: 100 } }))
+      .toEqual({ tokens: 3e6, cost: 2.4, unpricedTokens: 1e6 });
+  });
   it('splits model and effort attribution without splitting final frontend context or duplicating calls', async () => {
     store.readEvents.mockResolvedValue([message('model-a', 'high'), call('a'), message('model-b', 'low'), call('b'), call('b')]);
     const result = await usage.usageOverview();
@@ -360,7 +388,7 @@ describe('model attribution and equivalent cost', () => {
     store.readEvents.mockResolvedValue([message('model-a', 'high'), message('wrong', 'low', 'input:x'), call('a'), message(), call('b')]);
     expect((await usage.usageOverview()).models).toEqual([
       { model: 'model-a', reasoningEffort: 'high', assumed: false, tokens: 2.5 },
-      { model: 'gpt-5.6', reasoningEffort: 'high', assumed: true, tokens: 2.5 }
+      { model: 'unknown', reasoningEffort: null, assumed: true, tokens: 2.5 }
     ]);
   });
   it('direct call model overrides only that call and never inherits a different models effort', async () => {
@@ -381,7 +409,7 @@ describe('model attribution and equivalent cost', () => {
     const result = await usage.usageOverview();
     expect(result.models).toEqual([
       { model: 'model-a', reasoningEffort: 'high', assumed: false, tokens: 1 },
-      { model: 'gpt-5.6', reasoningEffort: 'high', assumed: true, tokens: 1 }
+      { model: 'unknown', reasoningEffort: null, assumed: true, tokens: 1 }
     ]);
   });
   it('keeps effort changes for the same model separate and late evidence invalidates the saved revision', async () => {

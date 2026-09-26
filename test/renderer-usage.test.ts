@@ -99,11 +99,32 @@ it('explains a pending background rebuild and replaces transport failure with a 
   expect(refresh.disabled).toBe(false);
 });
 
+it('separates unrecorded model usage from known models and never offers a guessed-model rate', async () => {
+  dom = new JSDOM(readFileSync(new URL('../src/renderer/index.html', import.meta.url), 'utf8'), { url: 'https://local.test/' });
+  vi.stubGlobal('window', dom.window); vi.stubGlobal('document', dom.window.document); vi.stubGlobal('localStorage', dom.window.localStorage);
+  const models = [{ model: 'gpt-5.6', reasoningEffort: 'high', assumed: true, tokens: 9e6 },
+    { model: 'gpt-6-pro', reasoningEffort: 'medium', assumed: false, tokens: 1e6 }];
+  const data: UsageOverview = { contextTokenCap: 400000, tokens: 1e7, models, days: [{ date: '2026-09-26', tokens: 1e7, models }],
+    sessions: 2, limits: [], messages: { through: Date.now(), days: [] } };
+  Object.assign(dom.window, { api: { getUsage: async () => ({ ok: true, data }) } });
+  const usage = await import('../src/renderer/usage.js'); usage.initUsage(); await usage.refreshUsage();
+  const table = dom.window.document.querySelector('#usageDays table')!;
+  const rows = [...table.querySelectorAll('tr')];
+  expect(rows[1]!.textContent).toContain('gpt-6-astra');
+  expect(rows[2]!.textContent).toContain('Unknown model · not recorded');
+  expect(table.textContent).not.toMatch(/gpt-5\.6|Sol|high|assumed/);
+  expect(rows[2]!.textContent).toContain('Not estimated');
+  expect(dom.window.document.querySelectorAll('#usageRates input')).toHaveLength(1);
+  expect(dom.window.document.getElementById('usageTotalCost')!.textContent).toContain(usd(1.2));
+  expect(dom.window.document.getElementById('usageTotalCost')!.textContent).toContain('unpriced');
+  expect(dom.window.document.getElementById('usageAttributionNote')!.textContent).toContain('workers');
+});
+
 it.each([256_000, 400_000])('shows the calculated %i context cap and edits formula preferences without reloading recordings', async (contextTokenCap) => {
   dom = new JSDOM(readFileSync(new URL('../src/renderer/index.html', import.meta.url), 'utf8'), { url: 'https://local.test/' });
   vi.stubGlobal('window', dom.window); vi.stubGlobal('document', dom.window.document); vi.stubGlobal('localStorage', dom.window.localStorage);
   const models = [
-    { model: 'gpt-5.6', reasoningEffort: 'high', assumed: true, tokens: 1e6 },
+    { model: 'gpt-5.6', reasoningEffort: 'high', assumed: false, tokens: 1e6 },
     { model: 'another-model', reasoningEffort: 'low', assumed: false, tokens: 1e6 }
   ];
   const data: UsageOverview = { contextTokenCap, messages: { through: Date.now(), days: [] }, tokens: 2e6, models, days: [{ date: '2026-09-05', tokens: 2e6, models }], sessions: 1, limits: ['deep_research', 'file_upload', 'paste_text_to_file', 'image_gen'].map(model => ({ model, scope: 'feature', remaining: 3, remainingPercent: 50, resetAt: null, windowSeconds: null, observedAt: Date.now() })) };

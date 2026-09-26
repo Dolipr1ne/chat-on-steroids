@@ -16,6 +16,22 @@ function run<T>(id: string, fn: () => T): T {
   return runInCallContext(context, fn);
 }
 const roots = () => [{ name: 'work', path: base }];
+it.each([undefined, ''])('never defaults an unfiled chat to the first approved folder (%s)', async workdir => {
+  project.mockResolvedValue(null);
+  const context = { roots: roots(), caps: defaultConfig().capabilities, readOnly: false };
+  await expect(run('unfiled', () => resolveCwd(context, workdir))).rejects.toThrow('WORKSPACE_REQUIRED');
+  expect((await run('unfiled', () => resolveCwd(context, '/work/b'))).real).toBe(path.join(base, 'b'));
+  expect((await run('unfiled', () => resolveCwd(context, undefined))).virtual).toBe('/work/b');
+});
+
+it('never borrows a different chat workspace when a project chat and an unfiled chat run together', async () => {
+  project.mockImplementation(async id => id === 'a' ? { virtual: '/work/a', real: path.join(base, 'a') } : null);
+  const context = { roots: roots(), caps: defaultConfig().capabilities, readOnly: false };
+  await run('a', () => resolveCwd(context, undefined));
+  await expect(run('unfiled', () => resolveCwd(context, undefined))).rejects.toThrow('WORKSPACE_REQUIRED');
+  expect((await run('a', () => resolveCwd(context, undefined))).virtual).toBe('/work/a');
+});
+
 it('initializes simultaneous Prime cwd from each exact durable session project', async () => {
   project.mockImplementation(async (id) => ({ virtual: `/work/${id}`, real: path.join(base, id) }));
   const [a, b] = await Promise.all(['a', 'b'].map(id => run(id, () => resolveCwd({ roots: roots(), caps: defaultConfig().capabilities, readOnly: false }, undefined))));

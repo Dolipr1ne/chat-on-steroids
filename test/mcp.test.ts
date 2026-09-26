@@ -1603,10 +1603,12 @@ describe('sandbox enforcement through the tool layer', () => {
     await expect(fs.stat(path.join(approved, 'escaped.txt'))).rejects.toThrow();
   });
 
-  it('still applies an ordinary relative patch path against its base', async () => {
+  it('still applies an ordinary relative patch after explicitly establishing its base', async () => {
     // The refusals above must not have been bought by breaking shorthand itself.
     ctx.readOnly = false;
     ctx.caps = withCaps({ create: true });
+    const read = await core('tools/call', { name: 'read', arguments: { paths: ['/workspace/notes.txt'] } });
+    expect(failed(read), textOf(read)).toBe(false);
     const reply = await core('tools/call', {
       name: 'apply_patch',
       arguments: { patch: addPatch('relative-landed.txt', ['x']) }
@@ -2074,6 +2076,26 @@ describe('apply_patch', () => {
     ctx.caps = withCaps({ create: true, edit: true, move: true, deleteFile: true });
   });
 
+  it('does not apply a relative patch to the only shared folder without a task workspace', async () => {
+    const filename = 'unfiled-destination.txt';
+    const refused = await core('tools/call', { name: 'apply_patch', arguments: { patch: addPatch(filename, ['not here']) } });
+    expect(failed(refused)).toBe(true);
+    expect(textOf(refused)).toContain('WORKSPACE_REQUIRED');
+    await expect(fs.stat(path.join(approved, filename))).rejects.toMatchObject({ code: 'ENOENT' });
+    const explicit = await core('tools/call', { name: 'apply_patch', arguments: { patch: addPatch(`/workspace/${filename}`, ['explicit destination']) } });
+    expect(failed(explicit), textOf(explicit)).toBe(false);
+    expect(await fs.readFile(path.join(approved, filename), 'utf8')).toBe('explicit destination\n');
+  });
+
+  it('a rejected absolute patch cannot teach the unrelated verifier root as the chat workspace', async () => {
+    const first = await core('tools/call', { name: 'apply_patch', arguments: { patch: addPatch('/unapproved-destination/file.txt', ['no']) } });
+    expect(failed(first)).toBe(true);
+    const second = await core('tools/call', { name: 'apply_patch', arguments: { patch: addPatch('no-inherited-root.txt', ['no']) } });
+    expect(failed(second), textOf(second)).toBe(true);
+    expect(textOf(second)).toContain('WORKSPACE_REQUIRED');
+    await expect(fs.stat(path.join(approved, 'no-inherited-root.txt'))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
   it.each([true, false])('returns mismatch guidance with source excerpts only under Read permission (%s)', async read => {
     ctx.caps = withCaps({ read, edit: true });
     const original = 'uniqueAnchor();\nactualSourceOnly();\n';
@@ -2504,6 +2526,15 @@ describe('exec_command and write_stdin', () => {
   beforeEach(() => {
     ctx.readOnly = false;
     ctx.caps = withCaps({ command: true });
+  });
+
+  it('refuses an omitted workdir before a command can create a file in the sole shared folder', async () => {
+    const filename = 'unfiled-command.txt';
+    const refused = await core('tools/call', { name: 'exec_command', arguments: { cmd: `echo unintended > ${filename}` } });
+    expect(failed(refused)).toBe(true);
+    expect(textOf(refused)).toContain('WORKSPACE_REQUIRED');
+    expect(textOf(refused)).not.toContain('TOOL_DISABLED');
+    await expect(fs.stat(path.join(approved, filename))).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
   it('refuses an approved virtual path in opaque shell text instead of running against the drive root', async () => {

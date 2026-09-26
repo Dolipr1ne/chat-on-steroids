@@ -6,7 +6,7 @@ import { initDurableStore, resetDurableForTests } from '../src/main/durable.js';
 import { addProject, assignSessionProject } from '../src/main/projects.js';
 import { createSession, initSessionStore, rebindSession, resetSessionStoreForTests } from '../src/main/session/store.js';
 import { fitSessionPrompt, prepareSessionPrompt } from '../src/main/session/prompt.js';
-import { MAX_CHATGPT_MESSAGE_CHARS, prependUserPrompt, userPromptText } from '../src/shared/user-prompt.js';
+import { MAX_CHATGPT_MESSAGE_CHARS, userPromptText } from '../src/shared/user-prompt.js';
 import { makeTempDir, removeTempDir } from './helpers.js';
 
 let directory: string;
@@ -19,6 +19,20 @@ it('opening instructions distinguish workflow intent from permissions and truthf
   expect(text).toContain('without repeating already completed actions');
   expect(text).toContain('distinguish source changes, passing tests, installed code and live behavior');
   expect(text).not.toContain('You can always use');
+});
+it('makes an unfiled opening explicit without adopting the sole approved project or its instructions', async () => {
+  const project = await addProject(directory);
+  await fs.writeFile(path.join(directory, 'AGENTS.md'), 'DO_NOT_INHERIT_THIS_PROJECT');
+  const unfiled = await createSession({ title: 'Unfiled file request' });
+  const result = await prepareSessionPrompt('Create a text file.', { sessionId: unfiled.id, projectId: project.id });
+  expect(result).toContain('No local project is selected for this chat.');
+  expect(result).toContain('downloadable file');
+  expect(result).not.toContain('Selected project directory:');
+  expect(result).not.toContain('DO_NOT_INHERIT_THIS_PROJECT');
+  expect(userPromptText(result)).toBe('Create a text file.');
+  const linked = await prepareSessionPrompt('Work in this project.', { projectId: project.id });
+  expect(linked).toContain('Selected project directory: /work');
+  expect(linked).not.toContain('No local project is selected for this chat.');
 });
 it('reduces AGENTS to 5000 before shortening every selected skill under char and byte limits', () => {
   const agents = { directory: '/work', text: 'A'.repeat(30_000), truncated: false };
@@ -97,7 +111,11 @@ it('reads only the linked folder, refreshes its contents, and leaves unfiled cha
   const file = path.join(project.path, 'AGENTS.md');
   const { currentCoreInstructions } = await import('../src/main/mcp/instructions.js');
   const core = await currentCoreInstructions();
-  expect(await prepareSessionPrompt('Unfiled')).toBe(prependUserPrompt('Unfiled', core));
+  const unfiled = await prepareSessionPrompt('Unfiled');
+  expect(unfiled).toContain(core);
+  expect(unfiled).toContain('No local project is selected for this chat.');
+  expect(unfiled).not.toMatch(/PARENT_DO_NOT_INJECT|CHILD_DO_NOT_INJECT|Selected project directory:/);
+  expect(userPromptText(unfiled)).toBe('Unfiled');
   const missing = await prepareSessionPrompt('Missing', { projectId: project.id });
   expect(missing).toContain('Selected project directory: /work/project');
   expect(missing).toContain('Use this directory as your default working directory');

@@ -1489,6 +1489,22 @@ it('groups project chats and restores each project composer with its selected id
   expect(w.document.querySelector<HTMLDetailsElement>(`[data-project-id="${projects[1]!.id}"]`)!.open).toBe(false);
 });
 
+it('global New Chat stays unfiled after visiting a project and keeps the project draft separate', async () => {
+  const project: LocalProject = { id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', name: 'Project', path: '/project', createdAt: 1 };
+  const { w, live, append } = await boot([], false, [], [project]);
+  const input = w.document.getElementById('chatInput') as HTMLTextAreaElement;
+  const chooseProject = () => (w.document.querySelector(`[data-new-project="${project.id}"]`) as HTMLButtonElement).click();
+  chooseProject(); input.value = 'Keep the project draft';
+  (w.document.getElementById('newChat') as HTMLButtonElement).click();
+  expect(input.placeholder).toBe('Ask anything…');
+  expect(input.value).toBe('');
+  await append([]); // Late history/status refresh must not supply a project.
+  input.value = 'Create a downloadable text file';
+  (w.document.getElementById('chatSend') as HTMLButtonElement).click(); await settle();
+  expect(live.sent.at(-1)).toMatchObject({ sessionId: null, projectId: null, text: 'Create a downloadable text file' });
+  chooseProject(); expect(input.value).toBe('Keep the project draft');
+});
+
 it('reorders whole project groups without changing chat selection, ownership or disclosure across refresh', async () => {
   const projects: LocalProject[] = [
     { id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', name: 'Alpha', path: '/alpha', createdAt: 1 },

@@ -4,7 +4,7 @@ import { listUsageSessions, readEvents } from './store.js';
 import { readDurable, writeDurableSoon } from '../durable.js';
 import { logInfo } from '../logger.js';
 import { eventTokens } from '../../shared/session.js';
-import { usageDateKey, usageMessageFamily, usageModelKey, usageWeekStart, type ModelUsage, type UsageMessageDay, type UsageModelTokens, type UsageOverview } from '../../shared/usage.js';
+import { UNKNOWN_USAGE_MODEL, usageDateKey, usageMessageFamily, usageModelKey, usageWeekStart, type ModelUsage, type UsageMessageDay, type UsageModelTokens, type UsageOverview } from '../../shared/usage.js';
 import { getChatModels } from '../chat-models.js';
 import { isProModel } from '../../shared/chat-models.js';
 const row = z.object({ model: z.string().min(1).max(100), scope: z.enum(['model', 'feature', 'shared']), remaining: z.number().finite().nonnegative().nullable(), remainingPercent: z.number().min(0).max(100).nullable(), resetAt: z.number().finite().positive().nullable(), windowSeconds: z.number().finite().positive().nullable() });
@@ -22,8 +22,9 @@ export function observeUsage(raw: unknown, capturedAt: unknown = Date.now()): vo
 }
 // One derived cache owns token totals and verified sends. Display preferences project
 // this baseline; only changed canonical session revisions reread transcripts.
-const CACHE_VERSION = 9;
-const modelTokens = z.object({ model: z.string().min(1).max(100), reasoningEffort: z.string().max(100).nullable(), assumed: z.boolean(), tokens: z.number().finite().nonnegative() });
+const CACHE_VERSION = 10;
+const modelTokens = z.object({ model: z.string().min(1).max(100), reasoningEffort: z.string().max(100).nullable(), assumed: z.boolean(), tokens: z.number().finite().nonnegative() })
+  .refine(row => !row.assumed || row.model === UNKNOWN_USAGE_MODEL && row.reasoningEffort === null);
 const verifiedMessage = z.object({ id: z.string().min(1).max(512), time: z.number().finite().positive().max(8.64e15), model: z.enum(['gpt-5.6', 'gpt-6']) });
 type VerifiedMessage = z.infer<typeof verifiedMessage>;
 const cacheRow = z.object({ id: z.string().max(64), revision: z.string().max(200), days: z.array(z.tuple([z.string().regex(/^\d{4}-\d{2}-\d{2}$/), z.array(modelTokens)])).max(36600), messages: z.array(verifiedMessage).max(100000) });
@@ -42,12 +43,14 @@ function mergeModels(target: Map<string, UsageModelTokens>, rows: readonly Usage
   }
 }
 type Attribution = Pick<UsageModelTokens, 'model' | 'reasoningEffort' | 'assumed'>;
-const LEGACY: Attribution = { model: 'gpt-5.6', reasoningEffort: 'high', assumed: true };
+// Missing evidence is not Sol (or any other model). Retain the compatibility
+// field `assumed`, but never attach a fabricated model, effort or price to it.
+const UNKNOWN: Attribution = { model: UNKNOWN_USAGE_MODEL, reasoningEffort: null, assumed: true };
 function attribution(raw: { model?: string; reasoningEffort?: string }, previous: Attribution): Attribution {
   const model = raw.model?.trim();
   const effort = raw.reasoningEffort?.trim();
   if (model) return { model, reasoningEffort: effort || (!previous.assumed && model === previous.model ? previous.reasoningEffort : null), assumed: false };
-  if (effort) return { ...previous, reasoningEffort: effort };
+  if (effort && !previous.assumed) return { ...previous, reasoningEffort: effort };
   return previous;
 }
 async function computeOverview(signal?: AbortSignal): Promise<UsageOverview> {
@@ -80,7 +83,7 @@ async function computeOverview(signal?: AbortSignal): Promise<UsageOverview> {
       const perDay = new Map<string, Map<string, UsageModelTokens>>();
       let context = 0;
       let conversation: string | null = null;
-      let selected = LEGACY;
+      let selected = UNKNOWN;
       const calls: Array<{ day: string; attribution: Attribution }> = [];
       const countedCalls = new Set<string>();
       const verified: VerifiedMessage[] = [];
@@ -93,13 +96,13 @@ async function computeOverview(signal?: AbortSignal): Promise<UsageOverview> {
           mergeModels(totals, [{ ...call.attribution, tokens: billingContext / 2 }]);
           perDay.set(call.day, totals);
         }
-        calls.length = 0; context = 0; selected = LEGACY;
+        calls.length = 0; context = 0; selected = UNKNOWN;
       };
       const events = await readEvents(session.id);
       signal?.throwIfAborted();
       for (const event of events) {
         // The delivered native row owns model proof. Never borrow the mutable picker,
-        // a later tool's model or LEGACY's token-estimation assumptions for this count.
+        // a later tool's model or unknown token attribution for this count.
         if (event.kind === 'user_message' && event.messageId && !event.messageId.startsWith('input:') && event.inputDelivery !== 'offered') {
           const model = usageMessageFamily(event.model);
           const time = event.authoredAt ?? event.time;
@@ -116,7 +119,7 @@ async function computeOverview(signal?: AbortSignal): Promise<UsageOverview> {
         }
         // Recorded selection belongs to this frontend history, never a mutable
         // global picker or a worker's requested-but-unconfirmed spawn setting.
-        if (event.kind === 'user_message' && !event.messageId?.startsWith('input:')) selected = LEGACY;
+        if (event.kind === 'user_message' && !event.messageId?.startsWith('input:')) selected = UNKNOWN;
         if (event.kind !== 'user_message' || !event.messageId?.startsWith('input:')) selected = attribution(event, selected);
         context += eventTokens(event);
         if (event.kind !== 'tool_call') continue;

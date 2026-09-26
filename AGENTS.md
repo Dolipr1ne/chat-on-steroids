@@ -612,7 +612,7 @@ change during an await. Error text must not leak hidden physical root paths.
 An approved `/workspace` may contain `projects/app`; it does not promise `/workspace/src`.
 Read the root for one-level discovery, preserve every real intermediate folder, and never
 repair a wrong path by guessing a missing project segment. Relative paths need a trustworthy
-workspace; an unresolved swarm caller must not fall back to the first approved root.
+workspace; no caller may use the first approved root as an implicit task destination.
 
 **Shell permission is broader.** `exec_command` runs arbitrary code as the logged-in user.
 Its initial cwd is approved, but the shell program is not confined to those roots. Read-only
@@ -638,6 +638,15 @@ Removing a project marks the catalog row `ungrouped`. Existing and unloaded sess
 inputs and workers keep their durable project association; their chats return to the ordinary
 sidebar list. Adding that same folder again restores grouping. It does not delete files,
 sessions or the approved root. A local project is distinct from a ChatGPT project route.
+
+Global New Chat is unfiled; only the project-specific action selects a project. Approved roots
+remain permission grants, not output-directory choices. Opening instructions explicitly identify
+an unfiled chat and prefer a downloadable chat file when supported for a newly requested file
+without a local destination; otherwise ask where to save it. Explicit task paths remain valid.
+An omitted command workdir or relative direct patch needs that caller's proven workspace. Without
+one, return WORKSPACE_REQUIRED before running or writing, regardless of other active workers.
+Absolute approved patches and explicit workdirs remain usable and can establish the same chat's
+working directory. No new root, implicit folder creation, session reassignment or file move occurs.
 
 `workspace.ts` is learned/inherited cwd, keyed to the proven chat or permitted transport request.
 Explicit session project binding takes precedence at kernel entry. Workers inherit only their
@@ -1434,7 +1443,7 @@ totals. Recorded results, overflow assets and actual MCP responses retain their 
 Code-mode children are recorded with dispatcher-proven `nested: true`: they remain audit/tool
 activity but contribute neither context tokens nor Usage billing calls. Only the outer exchange
 counts. Legacy rows lack this proof and keep their old estimate; request ids and timing are not
-safe nesting identities. Usage cache version 9 retains the distinction on recorded new calls.
+safe nesting identities. Usage cache version 10 retains the distinction on recorded new calls.
 
 `extension/usage.js` observes bounded allowed account-usage responses in MAIN world, including
 already available state; it does not retain raw account payloads. App `session/usage.ts` accepts
@@ -1449,8 +1458,11 @@ This billing policy neither changes recorded context/compaction nor claims a pro
 limit. Cap each frontend before aggregation, never the daily/model totals. The selected cap
 belongs to the Usage snapshot and cache revision; availability changes invalidate old totals.
 Model changes affect attribution; compaction starts another frontend segment. Duplicate call
-ids do not count twice. Historical rows without model proof carry an explicitly assumed legacy
-model. Canonical revision/timezone-keyed `usage-cache` avoids rereading unchanged transcripts;
+ids do not count twice. Historical rows without model proof are Unknown model, with no invented
+effort or model-specific cost. Cache version 10 rebuilds the older assumed-Sol totals from existing
+recordings; no authored history is rewritten. Unknown activity stays in the token total and its
+unpriced subtotal, below observed models. Worker activity is included and explained in the UI.
+Canonical revision/timezone-keyed `usage-cache` avoids rereading unchanged transcripts;
 formula changes only project cached totals. Startup warms this same cache once without awaiting
 it; a Usage visit joins the in-flight calculation. Only changed sessions are read, sequentially
 with an event-loop yield between reads, and quitting cancels the warmup before cache publication.
@@ -1463,8 +1475,8 @@ model selection proof for GPT-5.6 and GPT-6. It uses provider `authoredAt`, othe
 original delivery time; tool-injected `input:` rows, unconfirmed offers, unknown model IDs,
 missing model proof and future timestamps cannot contribute. Replayed/copied native IDs
 count once; conflicting model/time evidence abstains. Never borrow token attribution's
-legacy default, a current picker, or a later tool's model to increase these counts.
-Cache version 9 retains these minimal ID/model/time facts alongside token totals, so a
+missing-model bucket, a current picker, or a later tool's model to increase these counts.
+Cache version 10 retains these minimal ID/model/time facts alongside token totals, so a
 new week or a weekday click needs no extra transcript read. The renderer receives only
 seven local calendar days of counts and their snapshot end time. Its single weekday
 button above the rows cycles the start day, default Monday, persisted in `cos.usage.weekStart`; the range

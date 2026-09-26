@@ -13,9 +13,10 @@ app.whenReady().then(async () => {
     localStorage.setItem('cos.usage.weekStart', '6');
     localStorage.setItem('cos.ui.language', 'en');
     const model = {model:'gpt-5.6-sol',reasoningEffort:'high',assumed:false,tokens:1000000};
+    const unknown = {model:'unknown',reasoningEffort:null,assumed:true,tokens:1000000};
     const data = {contextTokenCap:400000, tokens:10000000,
-      days:Array.from({length:10},(_,i)=>({date:'2026-09-'+String(12+i).padStart(2,'0'),tokens:1000000,models:[model]})),
-      models:[{...model,tokens:10000000}], sessions:3,
+      days:Array.from({length:10},(_,i)=>({date:'2026-09-'+String(12+i).padStart(2,'0'),tokens:1000000,models:[i < 9 ? unknown : model]})),
+      models:[{...unknown,tokens:9000000},model], sessions:3,
       limits:[{model:'deep_research',scope:'feature',remaining:250,remainingPercent:null,resetAt:null,windowSeconds:null,observedAt:Date.now()},
         {model:'image_gen',scope:'feature',remaining:1000,remainingPercent:null,resetAt:null,windowSeconds:null,observedAt:Date.now()}],
       messages:{through:new Date(2026,8,21,12).getTime(),days:[
@@ -49,6 +50,12 @@ app.whenReady().then(async () => {
     assert.equal(await js(`document.querySelector('.settings-heading').nextElementSibling.id`), 'usageSummary', 'Usage opens directly with the summary');
     assert.equal(await js(`document.querySelector('.usage-panel').lastElementChild.contains(document.getElementById('usageMessageCounts'))`), true, 'Message counts belong to the bottom section');
     assert.equal(await js(`document.getElementById('usageStatus').getBoundingClientRect().height`), 0, 'Successful loading leaves no status gap');
+    assert.deepEqual(await js(`Array.from(document.querySelectorAll('#usageDays table:first-of-type tr td:first-child'),n=>n.textContent)`),
+      ['gpt-5.6-sol · high', 'Unknown model · not recorded'], 'Unknown history is not presented as the most-used model');
+    assert.equal(await js(`document.querySelectorAll('#usageRates input').length`), 1, 'No invented-model rate editor');
+    assert.equal(await js(`document.querySelector('#usageDays table:first-of-type tr:last-child td:last-child').textContent`), 'Not estimated');
+    assert.equal(await js(`document.getElementById('usageTotalCost').textContent.includes('unpriced')`), true);
+    assert.equal(await js(`document.getElementById('usageAttributionNote').textContent.includes('workers')`), true);
     const capture = async (name, bottom = true) => {
       await js(bottom ? `document.querySelector('.usage-messages').scrollIntoView({block:'end'})` : `document.querySelector('.usage-panel').scrollTop=0`);
       const bounds = await js(`(() => {
@@ -70,13 +77,17 @@ app.whenReady().then(async () => {
     await capture('wide-dark-top', false);
     await capture('wide-dark');
     await js(`document.getElementById('usageWeekStart').focus()`);
+    win.webContents.focus();
     win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Space' });
     win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Space' });
+    // Native input crosses the renderer event queue; dispatch is not an update receipt.
+    for (let i = 0; i < 40 && await js(`document.getElementById('usageMessages6').textContent`) !== '4'; i++)
+      await new Promise(resolve => setTimeout(resolve, 25));
     assert.equal(await js(`document.getElementById('usageMessages6').textContent`), '4', 'Native keyboard activation selects Sunday');
     assert.equal(await js(`localStorage.getItem('cos.usage.weekStart')`), '0');
     win.setSize(560, 850); win.webContents.setZoomFactor(1.25);
     await js(`window.setFixtureLanguage('ja'); document.documentElement.dataset.theme='light'`);
     await capture('narrow-japanese-light');
-    console.log('Usage week: bottom placement, compact rows, exact counts, native keyboard, persistence and two layouts passed.');
+    console.log('Usage: unknown/unpriced attribution, recorded worker scope, bottom placement, exact counts, native keyboard, persistence and two layouts passed.');
   } finally { win?.destroy(); await server.close(); app.quit(); }
 }).catch(error => { console.error(error); app.exit(1); });

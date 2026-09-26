@@ -151,6 +151,8 @@ it('does not learn the library as cwd even through a broad overlapping native ro
     expect(workspaceForChat('skill-cwd')).toBeNull();
     await expect(resolveCwd(withManagedSkills({ ...ctx, roots: [] }), undefined)).rejects.toThrow(/No folder/);
     expect((await resolveCwd(withManagedSkills(ctx), '/skills')).real).toBe(path.join(directory, 'skills'));
+    await expect(resolveCwd(withManagedSkills(ctx), undefined)).rejects.toThrow('WORKSPACE_REQUIRED');
+    expect((await resolveCwd(withManagedSkills(ctx), '/project')).virtual).toBe('/project');
     expect((await resolveCwd(withManagedSkills(ctx), undefined)).virtual).toBe('/project');
   });
 });

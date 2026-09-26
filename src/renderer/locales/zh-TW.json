@@ -1613,5 +1613,9 @@
   "This preset leaves unattributed-call access, microphone and media, automatic modes, and third-party plugin permissions unchanged.": "此預設不會變更未歸屬呼叫權限、麥克風與媒體權限、自動模式或第三方外掛權限。",
   "Local permissions apply to ordinary chats and projects. ChatGPT approvals are separate; blocked chats and approved folders remain protected.": "本機權限適用於一般聊天和專案。ChatGPT 核准另行處理；已封鎖聊天和已核准資料夾仍受保護。",
   "Recent activity · completion not confirmed": "近期有活動 · 尚未確認完成",
-  "Delete conversation": "刪除聊天"
+  "Delete conversation": "刪除聊天",
+  "Unknown model · not recorded": "未知模型 · 未記錄",
+  "No model was recorded for this activity. No model or price is guessed.": "此活動未記錄模型。不會猜測模型或價格。",
+  "Not estimated": "未估算",
+  "Includes recorded activity from chats and workers. Missing model evidence is shown separately and is not assigned a model-specific cost.": "包含聊天和子代理的已記錄活動。缺少模型證據的活動會分開顯示，不會計入特定模型的費用。"
 }

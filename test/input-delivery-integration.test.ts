@@ -1,6 +1,7 @@
 import { GOAL_MARKER_INSTRUCTION } from '../src/shared/goal-templates.js';
 import { currentCoreInstructions } from '../src/main/mcp/instructions.js';
-import { prependUserPrompt, userPromptText } from '../src/shared/user-prompt.js';
+import { userPromptText } from '../src/shared/user-prompt.js';
+import { fitSessionPrompt } from '../src/main/session/prompt.js';
 import { finishInstruction } from '../src/shared/finish.js';
 import { initSkillsPath } from '../src/main/skills.js';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -1354,7 +1355,8 @@ it('freezes the complete current prompt for each new chat and leaves the authore
   const first = await input.enqueueInput({ ...message(null, 'off'), mode: 'auto', text: 'First request' });
   const canonical = await currentCoreInstructions();
   const claim = await input.claimBrowserInput(first.id, 'exact-document', null, true);
-  expect(claim?.text).toBe(prependUserPrompt('First request', canonical));
+  expect(claim?.text).toBe(fitSessionPrompt('First request', canonical, null, undefined, [], true));
+  expect(claim?.text).toContain('No local project is selected for this chat.');
   expect(claim?.text).toContain(standing);
   expect((await input.listInputs()).find(row => row.id === first.id)?.text).toBe('First request');
   await saveConfig({ ...config, mcp: { ...config.mcp, instructions: 'Updated standing guidance' } });
@@ -1362,7 +1364,7 @@ it('freezes the complete current prompt for each new chat and leaves the authore
   await input.cancelInput(first.id);
   const second = await input.enqueueInput({ ...message(null, 'off'), mode: 'auto', text: 'Second request' });
   const next = await input.claimBrowserInput(second.id, 'next-document', null, true);
-  expect(next?.text).toBe(prependUserPrompt('Second request', await currentCoreInstructions()));
+  expect(next?.text).toBe(fitSessionPrompt('Second request', await currentCoreInstructions(), null, undefined, [], true));
   expect(userPromptText(next!.text)).toBe('Second request');
 });
 

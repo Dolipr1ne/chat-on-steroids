@@ -98,6 +98,7 @@ function coreInstructions(ctx: ToolContext, platform: NodeJS.Platform, skills: s
     'Report exact failures: identity, session_id and output-limit errors do not mean Read-only. Never replay successful patches or commands to recover a terminal.',
     'Unattributed is recording status, not permission. With Allow unattributed calls enabled, the request id owns its workspace, plan, terminals and agent family until exact chat proof arrives. A missing target limits that operation only; keep using enabled tools.',
     'Use full project paths under an approved root, including intermediate folders. Virtual or absolute native paths work; linked projects also accept relative paths.',
+    'Shared roots grant access, not a default project. For unfiled file requests, use chat downloads when supported or ask for a local destination.',
   ];
 
   if (caps.read || caps.browse || caps.metadata) lines.push(
@@ -108,7 +109,7 @@ function coreInstructions(ctx: ToolContext, platform: NodeJS.Platform, skills: s
     lines.push(
       'Use rg or rg --files for searches; if unavailable, use the next best tool. Prefer rg -g \'*.ts\' src over shell globs.',
       'exec_command is enabled. Batch checks with exec_command cmds: [...]: one shell, per-command output and exit codes.',
-      'Set workdir to the project; virtual paths work there. Inside cmd use relative or native paths.',
+      'Set workdir to the selected project or explicit task folder; omission requires a proven chat cwd. Inside cmd use relative or native paths.',
       'write_stdin accepts session_id (running) or completed_session_id (finished). Completed reads replay output without rerunning work. Inspect exit/output; benign_exit marks an expected non-zero result.',
       'If output is truncated, narrow the command or read the relevant region.'
     );

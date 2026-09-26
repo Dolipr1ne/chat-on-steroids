@@ -58,7 +58,7 @@ export const EXEC_COMMAND_CMD_DESCRIPTION = LAUNCHES_WINDOWS_POWERSHELL_5
 export const EXEC_COMMAND_CMDS_DESCRIPTION =
   'Use cmd or cmds, not both. cmds runs sequentially in one shell session; sections show exit codes. It continues after ordinary non-zero exits; first non-zero exit wins.';
 
-export const EXEC_COMMAND_WORKDIR_DESCRIPTION = 'Working directory for the command. Defaults to the turn cwd.';
+export const EXEC_COMMAND_WORKDIR_DESCRIPTION = 'Explicit approved workdir; omit only with a proven chat cwd.';
 
 export const EXEC_COMMAND_TTY_DESCRIPTION =
   'True allocates a PTY for the command; false or omitted uses plain pipes.';

@@ -89,7 +89,7 @@ export async function refreshUsage(): Promise<void> {
 function paintRates(): void {
   if (!snapshot) return;
   const host = $('usageRates'); host.replaceChildren();
-  for (const model of [...new Set(snapshot.models.map(row => row.model))].sort()) {
+  for (const model of [...new Set(snapshot.models.filter(row => !row.assumed).map(row => row.model))].sort()) {
     const label = el('label', 'setting'); const text = el('span', 'setting-text');
     text.append(el('b', '', model), el('em', '', () => usageRate(model, DEFAULT_USAGE_FORMULA) !== undefined ? t("USD / 1M cached input · editable official baseline, checked 7 September 2026") : t("USD / 1M cached input · enter a verified comparison rate")));
     const input = document.createElement('input'); input.type = 'number'; input.min = '0'; input.step = '0.01'; ui(input, 'placeholder', () => t("Unknown rate")); input.value = usageRate(model, formula)?.toString() ?? '';
@@ -128,17 +128,24 @@ function paintCost(): void {
   const modelTable = el('table', 'usage-table'); const modelHead = el('tr');
   for (const title of ['Recorded model / effort', 'Estimated tokens', 'Estimated equivalent']) modelHead.append(el('th', '', () => t(title)));
   modelTable.append(modelHead);
-  for (const entry of usageModelGroups(snapshot.models)) {
+  // Known model activity comes first. Unrecorded models are a separate subtotal,
+  // not the most-used model merely because early recordings missed attribution.
+  for (const entry of usageModelGroups(snapshot.models).sort((a, b) => Number(a.assumed) - Number(b.assumed))) {
     const estimate = usageEstimate(entry.sources, formula); const row = el('tr');
-    const name = el('td', '', () => `${entry.model} · ${entry.reasoningEffort ?? t("effort unknown")}${entry.assumed ? t(" (assumed)") : ''}`);
-    usageHint(name, () => t("Recorded IDs: {0}", [[...new Set(entry.sources.map(source => source.model))].join(', ')]));
-    row.append(name, el('td', '', Math.round(estimate.tokens).toLocaleString()), el('td', '', () => estimate.unpricedTokens > 0 && estimate.unpricedTokens === estimate.tokens ? t("Rate unknown") : costText(estimate))); modelTable.append(row);
+    const name = el('td', '', () => entry.assumed ? t('Unknown model · not recorded')
+      : `${entry.model} · ${entry.reasoningEffort ?? t("effort unknown")}`);
+    usageHint(name, () => entry.assumed ? t('No model was recorded for this activity. No model or price is guessed.')
+      : t("Recorded IDs: {0}", [[...new Set(entry.sources.map(source => source.model))].join(', ')]));
+    row.append(name, el('td', '', Math.round(estimate.tokens).toLocaleString()), el('td', '', () => entry.assumed ? t('Not estimated')
+      : estimate.unpricedTokens > 0 && estimate.unpricedTokens === estimate.tokens ? t("Rate unknown") : costText(estimate))); modelTable.append(row);
   }
   const table = el('table', 'usage-table'); const head = el('tr');
   head.append(el('th', '', () => t("Day")), el('th', '', () => t("Estimated tokens")), el('th', '', () => t("Cached × {0}", [formula.multiplier]))); table.append(head);
   for (const day of [...daily].reverse()) { const row = el('tr'); row.append(el('td', '', day.date), el('td', '', Math.round(day.tokens).toLocaleString()), el('td', '', costText(day))); table.append(row); }
   if (!snapshot.days.length) { const row = el('tr'); const cell = el('td', 'muted', () => t("No recorded tool calls yet.")); cell.setAttribute('colspan', '3'); row.append(cell); table.append(row); }
-  $('usageDays').replaceChildren(modelTable, table);
+  const attribution = el('p', 'muted', () => t('Includes recorded activity from chats and workers. Missing model evidence is shown separately and is not assigned a model-specific cost.'));
+  attribution.id = 'usageAttributionNote';
+  $('usageDays').replaceChildren(attribution, modelTable, table);
 }
 export function initUsage(): void {
   try {

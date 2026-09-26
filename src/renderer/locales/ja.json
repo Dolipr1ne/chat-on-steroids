@@ -1615,5 +1615,9 @@
   "This preset leaves unattributed-call access, microphone and media, automatic modes, and third-party plugin permissions unchanged.": "このプリセットは、チャット未特定の呼び出し、マイクとメディア、自動モード、サードパーティープラグインの権限を変更しません。",
   "Local permissions apply to ordinary chats and projects. ChatGPT approvals are separate; blocked chats and approved folders remain protected.": "ローカル権限は通常のチャットとプロジェクトに適用されます。ChatGPT の承認は別です。チャットのブロックと許可済みフォルダーの保護は維持されます。",
   "Recent activity · completion not confirmed": "最近の動作あり · 完了は未確認",
-  "Delete conversation": "チャットを削除"
+  "Delete conversation": "チャットを削除",
+  "Unknown model · not recorded": "不明なモデル · 未記録",
+  "No model was recorded for this activity. No model or price is guessed.": "このアクティビティのモデルは記録されていません。モデルや料金を推測することはありません。",
+  "Not estimated": "未推計",
+  "Includes recorded activity from chats and workers. Missing model evidence is shown separately and is not assigned a model-specific cost.": "チャットとサブエージェントの記録済みアクティビティを含みます。モデルを確認できないアクティビティは別に表示され、モデル別の費用は計算されません。"
 }

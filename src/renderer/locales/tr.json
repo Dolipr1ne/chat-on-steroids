@@ -1636,5 +1636,9 @@
   "This preset leaves unattributed-call access, microphone and media, automatic modes, and third-party plugin permissions unchanged.": "Bu ön ayar; ilişkilendirilmemiş çağrı erişimini, mikrofon ve medya izinlerini, otomatik modları ve üçüncü taraf eklenti izinlerini değiştirmez.",
   "Local permissions apply to ordinary chats and projects. ChatGPT approvals are separate; blocked chats and approved folders remain protected.": "Yerel izinler normal sohbetler ve projeler için geçerlidir. ChatGPT onayları ayrıdır; engellenen sohbetler ve onaylı klasörler korunur.",
   "Recent activity · completion not confirmed": "Yakın zamanda etkinlik var · tamamlanma doğrulanmadı",
-  "Delete conversation": "Sohbeti sil"
+  "Delete conversation": "Sohbeti sil",
+  "Unknown model · not recorded": "Bilinmeyen model · kaydedilmemiş",
+  "No model was recorded for this activity. No model or price is guessed.": "Bu etkinlik için model kaydedilmemiş. Model veya fiyat tahmin edilmez.",
+  "Not estimated": "Hesaplanmadı",
+  "Includes recorded activity from chats and workers. Missing model evidence is shown separately and is not assigned a model-specific cost.": "Sohbetlerin ve alt ajanların kaydedilen etkinliklerini içerir. Model bilgisi olmayan etkinlikler ayrı gösterilir ve bunlara modele özgü bir maliyet atanmaz."
 }

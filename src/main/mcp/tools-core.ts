@@ -116,7 +116,6 @@ import {
   stageFinishAgent,
   stageMessages,
   stageSpawn,
-  swarmRunning,
   swarmStateForCaller,
   type Caller
 } from '../agents.js';
@@ -636,17 +635,21 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
               : [hunk.path];
             return paths.some(path => !isAbsoluteVirtualPath(path) && !isNativeWindowsPath(path));
           });
-          if (!workspace && swarmRunning() && hasRelativePath) {
+          if (!workspace && hasRelativePath) {
             return fail(
-              'WORKSPACE_REQUIRED: this request has no workspace yet. Use an absolute approved path in this patch or another file tool first so the project can be learned.'
+              'WORKSPACE_REQUIRED: this chat has no selected working folder. Use the task\'s explicit absolute approved path or select a project. A relative patch cannot default to the first shared folder. No files were changed.'
             );
           }
+          // All-absolute hunks still need a verifier base; it does not choose their
+          // destinations. Shell interception retains its explicit exec workdir.
           const fallback = firstTaskRoot(ctx.roots);
           const baseVirtual = workspace?.virtual ?? (fallback ? `/${fallback.name}` : null);
           if (baseVirtual === null) {
             return fail('No folder is approved, so there is nowhere to apply the patch.');
           }
-          const base = await resolveIn(ctx.roots, baseVirtual);
+          // A verifier base is not evidence of the task's directory. Only the
+          // actual approved hunk paths may teach an initially unfiled workspace.
+          const base = workspace ? await resolveIn(ctx.roots, baseVirtual) : await resolvePath(ctx.roots, baseVirtual);
           return (await runParsedPatch(args, ctx.roots, base, caps)).result;
         })
     );

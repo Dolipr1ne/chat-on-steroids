@@ -7,10 +7,11 @@ export interface ModelUsage {
   windowSeconds: number | null;
   observedAt: number;
 }
+export const UNKNOWN_USAGE_MODEL = 'unknown';
 export interface UsageModelTokens {
   model: string;
   reasoningEffort: string | null;
-  /** Legacy rows with no recorded model use GPT-5.6 High, visibly marked as assumed. */
+  /** Compatibility field: true means no recorded model; display as unknown, never price it. */
   assumed: boolean;
   tokens: number;
 }
@@ -80,7 +81,9 @@ export function usageModel(model: string): string { return Object.hasOwn(usageAl
 export function usageModelGroups(rows: readonly UsageModelTokens[]): Array<{ model: string; reasoningEffort: string | null; assumed: boolean; sources: UsageModelTokens[] }> {
   const groups = new Map<string, { model: string; reasoningEffort: string | null; assumed: boolean; sources: UsageModelTokens[] }>();
   for (const row of rows) {
-    const identity = { model: usageModel(row.model), reasoningEffort: row.reasoningEffort, assumed: row.assumed };
+    const identity = row.assumed
+      ? { model: UNKNOWN_USAGE_MODEL, reasoningEffort: null, assumed: true }
+      : { model: usageModel(row.model), reasoningEffort: row.reasoningEffort, assumed: false };
     const key = usageModelKey(identity);
     const group = groups.get(key) ?? { ...identity, sources: [] };
     group.sources.push(row); groups.set(key, group);
@@ -102,7 +105,9 @@ export function usageEstimate(rows: readonly UsageModelTokens[], formula: UsageF
   for (const row of rows) {
     const amount = row.tokens * 2 / formula.divisor;
     tokens += amount;
-    const rate = usageRate(row.model, formula);
+    // Old snapshots may still carry a guessed named model. A saved rate cannot
+    // turn that missing evidence into a model-specific cost estimate.
+    const rate = row.assumed ? undefined : usageRate(row.model, formula);
     if (typeof rate === 'number' && Number.isFinite(rate) && rate >= 0) cost += amount / 1e6 * rate * formula.multiplier;
     else unpricedTokens += amount;
   }

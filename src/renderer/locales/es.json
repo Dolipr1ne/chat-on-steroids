@@ -1579,5 +1579,9 @@
   "This preset leaves unattributed-call access, microphone and media, automatic modes, and third-party plugin permissions unchanged.": "Este ajuste no modifica el acceso de llamadas sin atribuir, el micrófono y los medios, los modos automáticos ni los permisos de plugins de terceros.",
   "Local permissions apply to ordinary chats and projects. ChatGPT approvals are separate; blocked chats and approved folders remain protected.": "Los permisos locales se aplican a chats normales y proyectos. Las aprobaciones de ChatGPT son independientes; los chats bloqueados y las carpetas autorizadas siguen protegidos.",
   "Recent activity · completion not confirmed": "Actividad reciente · finalización sin confirmar",
-  "Delete conversation": "Eliminar conversación"
+  "Delete conversation": "Eliminar conversación",
+  "Unknown model · not recorded": "Modelo desconocido · no registrado",
+  "No model was recorded for this activity. No model or price is guessed.": "No se registró ningún modelo para esta actividad. No se supone ningún modelo ni precio.",
+  "Not estimated": "Sin estimar",
+  "Includes recorded activity from chats and workers. Missing model evidence is shown separately and is not assigned a model-specific cost.": "Incluye la actividad registrada de los chats y los agentes secundarios. La actividad sin datos del modelo se muestra por separado y no se le asigna un coste específico de un modelo."
 }

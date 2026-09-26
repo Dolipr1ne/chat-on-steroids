@@ -61,10 +61,11 @@ async function projectInstructions(scope: PromptScope): Promise<ProjectInstructi
 }
 
 /** Preserve Core/task; reduce AGENTS to 5k before sharing remaining space across Skills. */
-export function fitSessionPrompt(text: string, core: string, agents: ProjectInstructions | null = null, budget = limits, skills: SelectedSkill[] = []): string {
+export function fitSessionPrompt(text: string, core: string, agents: ProjectInstructions | null = null, budget = limits, skills: SelectedSkill[] = [], unfiled = false): string {
   const fits = (value: string): boolean => value.length <= Math.min(MAX_CHATGPT_MESSAGE_CHARS, budget.maxChars) &&
     Buffer.byteLength(value, 'utf8') <= budget.maxBytes;
-  const projectHeader = agents ? `Selected project directory: ${agents.directory}\nUse this directory as your default working directory and keep task work there unless the user or task requires another approved location. This project association grants no additional filesystem permissions.` : '';
+  const projectHeader = agents ? `Selected project directory: ${agents.directory}\nUse this directory as your default working directory and keep task work there unless the user or task requires another approved location. This project association grants no additional filesystem permissions.`
+    : unfiled ? 'No local project is selected for this chat. Approved folders are access grants, not default project or output folders. For a newly requested file without an explicit local destination, prefer a downloadable file in the chat when supported; otherwise ask where to save it before writing locally. Honor existing task paths and explicit local destinations. Never inherit another chat\'s project or choose a shared folder merely because it is the only one available.' : '';
   const mandatory = [core, projectHeader].filter(Boolean).join('\n\n');
   const base = prependUserPrompt(text, mandatory);
   if (!fits(base)) throw new Error('The message and main instructions exceed the delivery limit (maximum 96,000 characters). Shorten the message or standing instructions.');
@@ -120,7 +121,7 @@ export async function prepareSessionPrompt(text: string, scope: PromptScope = {}
   fitSessionPrompt(text, core, null, budget); // Only Core/task overflow is mandatory.
   const agents = await projectInstructions(scope);
   if ((await promptFolder(scope))?.real !== folder?.real) throw new Error('The selected project changed during Skill preparation');
-  return fitSessionPrompt(text, core, agents, budget, skills);
+  return fitSessionPrompt(text, core, agents, budget, skills, agents === null);
 }
 
 /** Explicit follow-up selection adds Skills only, never repeats opening setup. */

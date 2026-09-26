@@ -15,10 +15,15 @@ Recorded event model and effort metadata establish chronological selection withi
 frontend. Explicit call metadata overrides that call. Native user messages without
 selection evidence reset inheritance; app-injected `input:` rows neither establish
 nor reset it. Frontend changes, session starts and unattributed calls isolate the
-selection. Missing historical selection is visibly assumed GPT-5.6 High. A recorded
-model without effort stays effort-unknown rather than acquiring the legacy default.
+selection. Missing historical selection is **Unknown model · not recorded**, with no
+invented reasoning effort or model-specific price. A recorded model without effort
+stays effort-unknown. The mutable current picker cannot relabel older work.
 
-The existing versioned durable usage cache now stores daily model/effort totals.
+The existing versioned durable usage cache stores daily model/effort totals. Version
+10 invalidates the old GPT-5.6 High fallback and rebuilds only the derived totals from
+canonical recordings; messages, calls, token estimates and source history are not
+rewritten. The compatibility field `assumed` now identifies an unrecorded model, not
+a named model guess. Even a legacy named `assumed` row cannot acquire a saved rate.
 Unchanged session revisions reuse them across process restarts. Changed revisions
 rebuild only that session and removed recordings remove their cached contribution.
 The model totals and daily totals derive from the same rows, without a second cache.
@@ -32,7 +37,11 @@ formula default; other model rates remain unknown until entered. Partial costs e
 unpriced token count and are never presented as a complete bill or official price.
 The static Usage HTML owns the divisor and multiplier controls; renderer startup
 only binds them. The obsolete comparison-model picker and published-price claims
-were removed. Model rate fields are generated from the recorded model rows.
+were removed. Model rate fields are generated only from recorded model rows. Unknown
+models appear after observed models with **Not estimated** cost; their tokens remain
+included in total activity and the unpriced subtotal. Usage includes recorded worker
+activity as well as ordinary chats, so a worker's observed model remains represented
+even when the user selected another model for the parent chat.
 
 Validation: session-usage tests cover model switches, effort changes, duplicate
 calls, unknown native selection, injected rows, frontend isolation, late revision

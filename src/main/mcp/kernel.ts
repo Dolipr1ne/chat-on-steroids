@@ -1091,7 +1091,7 @@ export async function resolveIn(
 export interface ResolvedCwd {
   real: string;
   virtual: string;
-  /** True when the caller named no folder, so the workspace or first root was used instead. */
+  /** True when the caller named no folder, so its own proven workspace was used. */
   defaulted: boolean;
 }
 
@@ -1104,19 +1104,18 @@ export interface ResolvedCwd {
  * rebuilt the parent Electron app instead, and nothing in the reply said so.
  */
 export async function resolveCwd(ctx: ToolContext, virtualPath: string | undefined): Promise<ResolvedCwd> {
-  // The chat's own folder before the first root: a command with no `workdir` should run where the
-  // chat has been working, which is the whole point of the workspace and is exactly the case
-  // the note above describes going wrong.
+  // A root grants access; it is not this chat's task destination. Only the exact
+  // project or learned workspace can supply an omitted workdir.
   const workspace = await validatedWorkspace();
   // Codex treats an explicitly empty workdir exactly like an omitted one.
   const provided = virtualPath !== undefined && virtualPath !== '';
-  if (!provided && !workspace && swarmRunning()) {
+  if (!provided && !workspace) {
+    if (!firstTaskRoot(ctx.roots)) throw new SandboxError('No folder is approved, so there is nowhere to run');
     throw new SandboxError(
-      'WORKSPACE_REQUIRED: this multi-agent chat has no proven workspace. Supply an explicit approved workdir before running a command.'
+      'WORKSPACE_REQUIRED: this chat has no selected working folder. Supply the task\'s explicit approved workdir or select a project. Shared folders are not default output destinations. No command was run.'
     );
   }
-  const fallback = firstTaskRoot(ctx.roots);
-  const target = provided ? virtualPath : (workspace?.virtual ?? (fallback ? `/${fallback.name}` : ''));
+  const target = provided ? virtualPath : workspace!.virtual;
   if (!target) throw new SandboxError('No folder is approved, so there is nowhere to run');
   const resolved = await resolveIn(ctx.roots, target);
   const stat = await fs.stat(resolved.real);
