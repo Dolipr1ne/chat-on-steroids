@@ -7,6 +7,7 @@ import { initBrowserPreferences } from './browser-preferences.js';
 import { initConnectionAdvanced } from './connection-popover.js';
 import { initSetupGuide } from './setup-guide.js';
 import { initAppearance } from './appearance.js';
+import { initToolAccess } from './tool-access.js';
 import { initPet } from './pet.js';
 import type { AppearanceSettings } from '../shared/appearance.js';
 import type { BrowserBridgePort } from '../shared/browser-bridge.js';
@@ -100,6 +101,7 @@ const GROUPS: Group[] = [
 ];
 
 let state: AppState | null = null;
+let toolAccess: ReturnType<typeof initToolAccess> | undefined;
 /** Guards against saving while we are writing values into the controls. */
 let applying = false;
 
@@ -1706,6 +1708,26 @@ $('readOnlyBtn').addEventListener('click', () => {
   const current = requestedSettings?.readOnly ?? state.config.readOnly;
   void save({ readOnly: !current });
 });
+
+if (typeof api.toolAccessStatus === 'function' && typeof api.applyToolAccessPreset === 'function') {
+  // Both entry points share one consent owner. Reading the panel never changes
+  // permissions, enables automation, or grants ChatGPT/operating-system approval.
+  toolAccess = initToolAccess({
+    button: $<HTMLButtonElement>('fullAccessBtn'),
+    api: {
+      toolAccessStatus: async () => { await settingsSaveQueue; return api.toolAccessStatus(); },
+      applyToolAccessPreset: async preset => { await settingsSaveQueue; return api.applyToolAccessPreset(preset); }
+    },
+    onApplied: async () => { const next = await run(api.getState()); if (next) apply(next); },
+    openSettings: () => { showTab('home'); $('readOnlyBtn').scrollIntoView({ block: 'center' }); $('readOnlyBtn').focus(); }
+  });
+  $('composerToolAccess').addEventListener('click', () => {
+    // The menu closes after the click; restore its visible summary, not the
+    // hidden Settings-page trigger, when the shared access dialog closes.
+    void toolAccess?.open($('composerSettings').querySelector<HTMLElement>('summary')!);
+  });
+  window.addEventListener('beforeunload', () => toolAccess?.dispose(), { once: true });
+}
 
 $('addFolder').addEventListener('click', () => void addFolder());
 $('wizAddFolder').addEventListener('click', () => void addFolder());

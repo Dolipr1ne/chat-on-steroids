@@ -52,6 +52,15 @@ export interface PreferredBrowserOpenOptions {
   launch?: Launch;
   /** Test seam for the Windows minimized startup wrapper. */
   powershell?: typeof runPowerShell;
+  /** The original operation must still own every executable attempt. */
+  current?: () => boolean | Promise<boolean>;
+}
+
+class BrowserLaunchUnconfirmedError extends Error {
+  readonly code = 'BROWSER_LAUNCH_UNCONFIRMED';
+  constructor() {
+    super('Background browser launch failed: the OS handoff timed out and may already have opened the browser. No automatic retry was made.');
+  }
 }
 
 function isExecutableBrowser(candidate: string, platform: NodeJS.Platform): boolean {
@@ -206,11 +215,12 @@ export function findPreferredBrowser(
  * Existence/executable checks are intentionally not the arbitration cut. A stale wrapper or a
  * damaged first Chrome install can pass those checks and still fail at spawn time; worker/resume
  * URLs may try another installation of that family, never the system default or another family.
+ * A revoked operation returns null before dispatch; an unconfirmed handoff cannot try again.
  */
 export async function openInPreferredBrowser(
   url: string,
   options: PreferredBrowserOpenOptions = {}
-): Promise<string> {
+): Promise<string | null> {
   const platform = options.platform ?? process.platform;
   const env = options.env ?? process.env;
   const usable = options.usable ?? ((candidate: string) => isExecutableBrowser(candidate, platform));
@@ -230,6 +240,7 @@ export async function openInPreferredBrowser(
 
   for (const browser of new Set(preferredBrowserCandidates(platform, env, options.home, selected))) {
     if (!usable(browser)) continue;
+    if (options.current && !await options.current()) return null;
     try {
       // A windowless Chrome exits once extensions load unless the profile has a
       // persistent background app. Launch the marked helper itself so its tab
@@ -246,11 +257,13 @@ export async function openInPreferredBrowser(
         // startup request, not Node's console-only windowsHide flag. No -Wait:
         // the owned helper tab, not this wrapper, keeps the browser alive.
         const result = await (options.powershell ?? runPowerShell)(script, cwd, 10_000);
-        if (result.timedOut || result.exitCode !== 0) throw new Error(`Background browser launch failed: ${result.stderr.slice(0, 300) || 'PowerShell did not complete'}`);
+        if (result.timedOut) throw new BrowserLaunchUnconfirmedError();
+        if (result.exitCode !== 0) throw new Error(`Background browser launch failed: ${result.stderr.slice(0, 300) || 'PowerShell did not complete'}`);
       }
       else await launch(browser, args, cwd);
       return browser;
     } catch (error) {
+      if (error instanceof BrowserLaunchUnconfirmedError) throw error;
       lastError = error;
     }
   }

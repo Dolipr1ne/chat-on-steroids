@@ -28,6 +28,12 @@ type FileIdentity = {
 
 type SkillRecord = SkillDocument & { identity: FileIdentity; revision: string };
 
+/** A witnessed change to an approved alias invalidates the whole scan. Skipping
+ * it would publish a misleading empty/partial catalog when root stats lag. */
+class ChangedSkillLink extends Error {
+  constructor() { super('The managed Skills folder changed while being read'); }
+}
+
 const MAX_LIBRARY_ENTRIES = 256;
 const SKILL_FILENAME = 'SKILL.md';
 const RESERVED_IDS = new Set(['prompt']);
@@ -243,7 +249,10 @@ async function recordAt(candidateRoot: string, id: string): Promise<SkillRecord 
     const fileStat = await fs.lstat(filename);
     if (!fileStat.isFile() || fileStat.isSymbolicLink()) return null;
     const fileReal = process.platform === 'win32' ? await rawRealpathNative(filename) : await fs.realpath(filename);
-    if (!sameNativePath(fileReal, path.join(directoryReal, SKILL_FILENAME))) return null;
+    if (!sameNativePath(fileReal, path.join(directoryReal, SKILL_FILENAME))) {
+      if (linked) throw new ChangedSkillLink();
+      return null;
+    }
     // Once a linked package has been approved, read the canonical file itself. Opening through
     // the alias here would leave a retarget window between realpath() and open(). The alias is
     // still checked again below so a concurrent retarget invalidates the record.
@@ -251,14 +260,20 @@ async function recordAt(candidateRoot: string, id: string): Promise<SkillRecord 
     const currentFile = identityOf(await fs.lstat(filename));
     const currentDirectory = identityOf(await fs.lstat(directory));
     if (!sameIdentity(snapshot.identity, currentFile) ||
-        !sameIdentity(identityOf(directoryStat), currentDirectory)) return null;
+        !sameIdentity(identityOf(directoryStat), currentDirectory)) {
+      if (linked) throw new ChangedSkillLink();
+      return null;
+    }
     const currentReal = process.platform === 'win32' ? await rawRealpathNative(filename) : await fs.realpath(filename);
-    if (!sameNativePath(currentReal, path.join(directoryReal, SKILL_FILENAME))) return null;
+    if (!sameNativePath(currentReal, path.join(directoryReal, SKILL_FILENAME))) {
+      if (linked) throw new ChangedSkillLink();
+      return null;
+    }
     if (linked) {
       const config = getConfig();
       if (!effectiveCapabilities(config).read) return null;
       const currentLink = await approvedManagedSkillLink(candidateRoot, id, config.roots);
-      if (!currentLink || !sameSkillLink(linked, currentLink)) return null;
+      if (!currentLink || !sameSkillLink(linked, currentLink)) throw new ChangedSkillLink();
     }
     const metadata = metadataFor(snapshot.text, id);
     return {
@@ -267,7 +282,8 @@ async function recordAt(candidateRoot: string, id: string): Promise<SkillRecord 
       identity: snapshot.identity,
       revision: createHash('sha256').update(snapshot.bytes).digest('hex')
     };
-  } catch {
+  } catch (error) {
+    if (error instanceof ChangedSkillLink) throw error;
     return null;
   }
 }

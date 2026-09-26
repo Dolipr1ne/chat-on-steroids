@@ -9306,6 +9306,62 @@ describe('unattributed activity recovery', () => {
     } finally { vi.useRealTimers(); }
   });
 
+  it('a late finish from an older request cannot retire the newer turn activity', async () => {
+    const { sessionActivityExpiresAt } = await import('../src/main/bridge.js');
+    vi.useFakeTimers();
+    try {
+      await pair(); const chat = randomUUID(), oldRequest = 'wfr_old_finish_' + randomUUID(), nextRequest = 'wfr_next_work_' + randomUUID();
+      const evidence = (turnId: string, requestId: string) => ({ kind: 'tool_evidence', time: Date.now(), turnId,
+        calls: [{ messageId: 'proof-' + requestId, tool: 'read', order: 0, answered: false, requestId }] });
+      const call = (requestId: string, startedAt: number, endsActivity = false) => recordToolCall({
+        tool: endsActivity ? 'session_finish' : 'read', args: {}, content: [{ type: 'text', text: 'Synthetic completed call' }],
+        outcome: 'ok', durationMs: 1, requestId, startedAt, endsActivity });
+      const began = Date.now();
+      await events(chat, [openTurn('old-finishing-turn'), evidence('old-finishing-turn', oldRequest)]);
+      await call(oldRequest, began);
+      await vi.advanceTimersByTimeAsync(1000);
+      await events(chat, [
+        { kind: 'user_message', messageId: 'new-question-after-finish', time: Date.now(), text: 'A distinct new task', authoredNow: true },
+        openTurn('new-working-turn'), evidence('new-working-turn', nextRequest)
+      ]);
+      await call(nextRequest, Date.now());
+      const current = (await findSessionByConversation(chat))!, deadline = sessionActivityExpiresAt(current);
+      expect(deadline).toBeTypeOf('number');
+      await call(oldRequest, began, true);
+      const after = (await getSession(current.id))!;
+      expect(after.activeTurnId).toBe('new-working-turn');
+      expect(sessionActivityExpiresAt(after)).toBe(deadline);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('publishes retirement of activity after a delayed tool-completion read, not only the earlier tool row', async () => {
+    const { sessionActivityExpiresAt } = await import('../src/main/bridge.js');
+    const { onSessionChange } = await import('../src/main/session/recorder.js');
+    vi.useFakeTimers();
+    let release: (() => void) | undefined, unsubscribe = () => {};
+    try {
+      await pair(); const chat = randomUUID();
+      await events(chat, [openTurn('retire-notification')]); await attributed(chat, false, Date.now());
+      const session = (await findSessionByConversation(chat))!;
+      await vi.advanceTimersByTimeAsync(401);
+      const reads: Array<number | null | undefined> = [];
+      unsubscribe = onSessionChange(() => reads.push(sessionActivityExpiresAt(session)));
+      const original = sessionStoreModule.readCompletedFinal;
+      let entered!: () => void;
+      const reached = new Promise<void>(resolve => { entered = resolve; });
+      const blocked = new Promise<void>(resolve => { release = resolve; });
+      const spy = vi.spyOn(sessionStoreModule, 'readCompletedFinal').mockImplementationOnce(async (...args) => {
+        entered(); await blocked; return original(...args);
+      });
+      const finishing = attributed(chat, true, Date.now());
+      await reached; await vi.advanceTimersByTimeAsync(401);
+      expect(reads.at(-1)).toBeTypeOf('number');
+      release!(); await finishing; spy.mockRestore();
+      await vi.advanceTimersByTimeAsync(401);
+      expect(reads.at(-1)).toBeNull();
+    } finally { release?.(); unsubscribe(); vi.restoreAllMocks(); vi.useRealTimers(); }
+  });
+
   it.each(['pro', 'other'] as const)('keeps completed native %s replies idle when their request delivers trailing tools', async model => {
     const chat = model === 'pro' ? 'a2222222-1111-4111-8111-000000000091' : 'a2222222-1111-4111-8111-000000000092';
     const turnId = 'native-trailing-tools';
@@ -12601,11 +12657,14 @@ describe('app requests to stop one exact active turn', () => {
     // The click receipt is not a provider completion. Both frontends still show
     // the exact running turn, and automation remains paused until native proof.
     expect((await sessionControlsFor(sessionId))).toMatchObject({ activeTurnId: 'stop-turn-one', stopPending: true });
-    expect((await request('GET', `/activity?conversationId=${conversationId}`)).body.activeTurnId).toBe('stop-turn-one');
+    expect((await request('GET', `/activity?conversationId=${conversationId}`)).body)
+      .toMatchObject({ activeTurnId: 'stop-turn-one', stopPending: true });
     await request('POST', '/events', { body: { conversationId, events: [
       { kind: 'turn_end', time: Date.now(), turnId: 'stop-turn-one', outcome: 'stopped' }
     ] } });
     expect((await sessionControlsFor(sessionId))).toMatchObject({ activeTurnId: null, stopPending: false });
+    expect((await request('GET', `/activity?conversationId=${conversationId}`)).body)
+      .toMatchObject({ activeTurnId: null, stopPending: false });
   });
   it('refuses stale turn controls and an old request after the next turn starts', async () => {
     const { stopSessionTurn } = await import('../src/main/bridge.js');
@@ -12622,6 +12681,8 @@ describe('app requests to stop one exact active turn', () => {
     expect((await request('GET', '/status')).body.stopTurns).toEqual([]);
     expect((await getSession(sessionId))?.activeTurnId).toBe('stop-turn-two');
     expect((await getSession(sessionId))?.finishTurn?.released).toBe(false);
+    expect((await request('GET', `/activity?conversationId=${conversationId}`)).body)
+      .toMatchObject({ activeTurnId: 'stop-turn-two', stopPending: false });
   });
   it('does not dispatch another Stop after its click was acknowledged but cancellation is still unconfirmed', async () => {
     const { stopSessionTurn } = await import('../src/main/bridge.js');
@@ -12653,6 +12714,7 @@ describe('app requests to stop one exact active turn', () => {
       await vi.advanceTimersByTimeAsync(2);
       expect(notified).toHaveBeenCalled();
       expect(await sessionControlsFor(sessionId)).toMatchObject({ activeTurnId: 'stop-turn-one', stopPending: false });
+      expect((await request('GET', `/activity?conversationId=${conversationId}`)).body.stopPending).toBe(false);
       expect((await getSession(sessionId))?.activeTurnId).toBe('stop-turn-one');
       // A deliberate retry after expiry owns a new deadline; expiry never clicks Stop.
       expect((await request('GET', '/status')).body.stopTurns).toEqual([]);

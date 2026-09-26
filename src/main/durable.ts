@@ -48,13 +48,16 @@ function fileFor(name: string): string {
   return path.join(root, `${name}.json`);
 }
 
-export async function readDurable<T>(name: string): Promise<T | null> {
+export async function readDurable<T>(name: string, options: { strict?: boolean } = {}): Promise<T | null> {
   if (!root) return null;
   try {
     const raw = await fs.readFile(fileFor(name), 'utf8');
     return JSON.parse(raw) as T;
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
+    // Deletion receipts must distinguish an absent ledger from an unreadable one:
+    // forgetting a confirmed deletion could resurrect its delayed browser history.
+    if (options.strict && code !== 'ENOENT') throw err;
     if (code && code !== 'ENOENT') {
       logWarn(`could not read ${name} state: ${(err as Error).message}`);
     }

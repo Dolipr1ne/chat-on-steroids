@@ -3512,9 +3512,10 @@ export async function deleteSession(id: string): Promise<void> {
   if (entry) {
     if (entry.metaTimer) clearTimeout(entry.metaTimer);
     await entry.queue.catch(() => undefined);
-    open.delete(id);
   }
   await fs.rm(sessionDir(id), { recursive: true, force: true });
+  // A failed filesystem removal must not detach an intact recording from memory.
+  if (open.get(id) === entry) open.delete(id);
   invalidateAssetUsage(id);
   publishAttachmentRemoval(id);
 }

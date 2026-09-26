@@ -1739,16 +1739,25 @@
       await ask({ type: 'stop_ack', id: commandId, client: RUN_ID, conversationId: target, turnId: expected, status: 'sent' });
       return true;
     }
-    const native = currentAssistantTurn();
     const nativeId = pageTurnIds.get(expected);
+    const questionId = openedUserMessageId;
     const latestNative = () => CLF_DOM.turns().at(-1);
-    if (!generating || !nativeId || native?.id !== nativeId || latestNative()?.id !== nativeId) return false;
+    const nativeCurrent = () => {
+      const latest = latestNative();
+      if (nativeId) return latest?.role === 'assistant' && latest.id === nativeId && pageTurnIds.get(expected) === nativeId;
+      // Stop can appear before the first assistant section. The accepted question
+      // already owns this generation; retain that exact identity through redeem.
+      // An older answer above it cannot supply the missing response identity.
+      return !!questionId && openedUserMessageId === questionId && stopQuestionMatches(questionId) &&
+        (latest?.role === 'user' || (latest?.role === 'assistant' && pageTurnIds.get(expected) === latest.id));
+    };
+    if (!generating || !nativeCurrent()) return false;
     const reply = await ask({ type: 'stop_redeem', id: commandId, client: RUN_ID, conversationId: target });
     observe();
     const command = reply?.command;
     if (!reply?.ok || command?.type !== 'stop' || command.turnId !== expected || command.conversationId !== target) return false;
-    const canStop = () => current() && generating && (!unwitnessedGeneration || stopQuestionMatches(command.userMessageId)) && latestNative()?.role === 'assistant' &&
-      latestNative()?.id === nativeId && pageTurnIds.get(expected) === nativeId;
+    const canStop = () => current() && generating && nativeCurrent() &&
+      (!unwitnessedGeneration || stopQuestionMatches(command.userMessageId));
     // Concurrent redemptions may finish after the first click, before ChatGPT removes Stop.
     const stopped = stoppedAppCommands.has(commandId) || requestNativeStop(canStop);
     if (stopped) {
@@ -6319,15 +6328,19 @@
         streamBySeq.set(seq, entry);
         streamAdded++;
         if (workChanged && isWork(entry) && (entry.kind !== 'page_tool' || !held)) exactTurnActivity = true;
-        // The app has re-proven this exact response from a call STARTED after Stop.
-        // Old results, history revisions, another turn, and a finish call cannot
-        // withdraw intent. The main process still owns the actual reload ticket.
-        if (!held && stopRequestedAt && !fiberTerminalMessageId && data.activeTurnId === turnId && !data.stopTurn &&
-            entry.kind === 'tool_call' && entry.attribution === 'request_id' && entry.turnId === turnId &&
-            !['session_finish', 'keep_astra_on_forever'].includes(entry.tool) &&
-            Number.isFinite(entry.time) && entry.time > stopRequestedAt && entry.time <= Date.now()) {
+      }
+      // The app has re-proven this exact response from a call STARTED after Stop.
+      // Preserve intent through its pending receipt. On expiry, already-observed
+      // subsequent work still counts; waiting for a second call would pin Stop.
+      // Old results, another turn, and a finish call cannot withdraw intent.
+      if (stopRequestedAt && !fiberTerminalMessageId && data.activeTurnId === turnId && !data.stopTurn && !data.stopPending) {
+        for (const entry of streamBySeq.values()) {
+          if (entry.kind !== 'tool_call' || entry.attribution !== 'request_id' || entry.turnId !== turnId ||
+              ['session_finish', 'keep_astra_on_forever'].includes(entry.tool) ||
+              !Number.isFinite(entry.time) || entry.time <= stopRequestedAt || entry.time > Date.now()) continue;
           stopRequestedAt = 0;
           resumedStoppedTurn = true;
+          break;
         }
       }
       if (streamAdded > 0) trimStream();

@@ -286,6 +286,15 @@ legacy omitted fields and malformed-file recovery are three different cases. Use
 not be widened because a newer version added a field. Read-only derives from the write-capability
 set; adding a new mutating capability must make it read-only-blocked automatically.
 
+`tool-access.ts` exposes one explicit full-local-access preset through fixed main-window IPC.
+Settings and the composer open the same status/consent panel. The preset disables Read-only and
+enables platform-supported local capabilities only after native confirmation and a rechecked
+permission/root snapshot. It neither approves folders nor changes blocked chats, unattributed-call
+access, automatic modes, microphone permission, third-party plugins, ChatGPT approvals or OS consent.
+Commands retain their documented OS-account reach outside approved folders. Publish after the
+serialized config write; run runtime refresh outside that writer so a dependent config update
+cannot deadlock. Opening or refreshing the panel changes nothing.
+
 Setup profiles switch only Core/Desktop/Plugins tunnel IDs and the tunnel API-key identity.
 The active IDs remain in `config.tunnel`; `config.setupProfiles` contains inactive snapshots
 only. `setup-profiles.ts` switches both in one queued config commit, incrementing `profileEpoch`.
@@ -401,6 +410,10 @@ only while its final target remains inside an ordinary currently approved root. 
 then acts as a package-bounded alias for that target; resource paths are revalidated at use and
 cannot traverse above the linked package. The managed root itself and linked `SKILL.md` files
 remain non-linkable. Desktop and external plugins receive no managed root.
+If an already-approved linked package changes its canonical target or captured identity during
+a scan, invalidate the scan explicitly rather than publishing an empty/partial catalog. The
+containing directory's timestamps may remain unchanged. Stable invalid/unapproved entries still
+stay excluded, and the canonical read path must never follow a newly retargeted alias.
 
 Skills open through leading `/` completion in the composer; the attachment popup's Skills button
 inserts that leading slash and focuses the input while preserving existing draft text. Commands and Skills are
@@ -819,6 +832,12 @@ delivery remains Queued. The existing browser election and exact claim still own
 Cancellation revokes both the outbox row and its transient startup controller; shutdown aborts
 startup and explicit retries before they can wake a browser later. Startup failure leaves the
 same queued input and an explicit retry action.
+An immediate due explicit Send may hand its already-owned URL to the selected browser when that
+browser is positively running but neither the wake socket nor recent authenticated HTTP proves
+the companion reachable. Recovery/discovery remain absence-only. Recheck the input/controller and
+source before each executable candidate. A Windows wrapper timeout is an unconfirmed handoff,
+not permission to try another executable or open another tab. Within the process lifetime, the
+same successful/unconfirmed URL handoff cannot be refunded by a later status-write failure.
 Explicit withdrawal of an opening also removes its empty, unbound local reservation when Send
 was provably never authorized. The cancelled outbox tombstone survives restart. Timeouts,
 startup failures, ambiguous sends, provider bindings and recorded history never grant deletion.
@@ -1237,6 +1256,12 @@ updates one namespaced progress/message identity in its original place. A HTML r
 old worker final must not put a revived worker to sleep. Unknown identity is never folded by
 similar text, time or display position. Recovery messages use this same projection mechanism.
 
+Runtime activity retirement also uses the recorder's existing coalesced session notification.
+A completion read may outlive the earlier tool-row notice; the sidebar must receive the later
+retired projection without waiting for another message. An older request's delayed finish cannot
+retire a newer exact turn. The status line uses the same recent-activity projection as the sidebar,
+but describes unconfirmed completion honestly; that display grants no Stop, Send or injection.
+
 The session's derived `timelineTurns` index retains each exact generation's first start and
 observed end. Every read projects `turnOrigin` before rendering so paging out a `turn_start`
 cannot change the order of its surviving replies/calls. Explicit null means unowned, not a
@@ -1317,6 +1342,21 @@ older successful `view_image` rows without assets explicitly show that no previe
 Neither a saved preview nor a local HTTP completion proves remote model comprehension.
 
 ### App history
+
+Deleting a recording now asks explicitly for local-only deletion or deletion of both the local
+recording and its CURRENT ChatGPT conversation. Older Compact & Resume source conversations,
+project files and provider Library files are not included. The fixed main-window operation checks
+idle/queue/continuation ownership again after confirmation. Remote deletion uses only the exact
+native menu/confirmation, under current browser-control permission, and observes its own native
+request's accepted receipt. A menu click, route change or title match never proves deletion.
+Unknown UI, cancellation or missing receipt retains local history and reports uncertainty.
+
+`deleted-conversations.ts` retains only confirmed remote-deletion IDs in a bounded durable ledger.
+An unreadable ledger cannot be treated as absent. Late browser journals/ownership evidence cannot
+recreate those recordings, including after restart. `deleteRecordingAfterDrain` joins the existing
+observation/recording queues before removal; failed local removal preserves its mapping. Local-only
+deletion deliberately permits an open, still-existing web conversation to be recorded anew and
+the confirmation explains this. No model-facing deletion tool or automatic bulk deletion is added.
 
 Native message reactions are metadata on the exact user-message UUID observed by
 `chatgpt-dom.js`, carried through content/bridge/recorder into its canonical shard.
@@ -2230,6 +2270,11 @@ without renewing on retries. Browser election is saved before opening; lost rece
 and user closure do not grant another opening for that command. A reopened page adopts the
 pending Stop only after matching its original native question, and rechecks that identity before
 clicking Stop. Newer questions never inherit the old Stop's authority.
+An exactly accepted question/turn can own Stop before the first assistant section mounts; the
+same native question and document are checked again after redemption. The activity feed retains
+the existing pending-Stop receipt after click acknowledgement, until its original deadline or
+verified completion. On expiry, already-observed subsequent exact MCP work can be reconciled;
+it need not wait for an extra call and does not become fresh work merely by being re-read.
 Block persists the exact conversation's local-tool refusal across all MCP surfaces; only a
 user release/deletion removes it. It does not remotely terminate ChatGPT or erase history.
 Neither action may spill into another local session merely because labels or timing match.
@@ -3272,6 +3317,13 @@ hand-editing staged binaries. Native and editor dependencies need actual runtime
 “install newest”, rebuild the current authorized tree, compare installed payload hashes to the
 package, and verify that runtime's relevant flow. An installer exit code or version label is
 insufficient. A dirty-tree snapshot request does not authorize exposing all local Git history.
+
+`scripts/repair-install-inventory.ps1` is a read-only, bounded helper for explicit repair installers.
+Include hidden files and refuse links/junctions. Staged files require an exact inventory. Existing
+extra files may be preserved in a verified whole-directory backup, but never become executable
+replacement-package content; missing or changed required files still refuse replacement by name.
+An installer must refuse running work, verify candidate/native/dependency bytes, recheck the
+original inventory before replacement, and preserve concurrent changes during rollback.
 
 `update.ts` checks immediately and every six hours with one in-flight pass. Download to a
 partial file, verify SHA-256 before staging/adoption, and rehash at ordinary quit before handing

@@ -14,6 +14,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import { conversationDeleted, resetDeletedConversationsForTests } from './deleted-conversations.js';
 import sharp from 'sharp';
 import { userTitle } from './title.js';
 import type {
@@ -47,6 +48,7 @@ import {
   completeProcessCall,
   observeSessionModel,
   conversationAttachment,
+  deleteSession,
   createSession,
   conversationWasSuperseded,
   endSession,
@@ -176,6 +178,10 @@ function notifyChanged(): void {
   notifyTimer.unref?.();
 }
 
+/** Runtime activity shares the recorder's coalesced UI notification. This does
+ * not append history, renew a work clock or grant any browser action. */
+export function notifySessionActivityChanged(): void { notifyChanged(); }
+
 export function recordingEnabled(): boolean {
   return getConfig().sessions.record;
 }
@@ -194,6 +200,7 @@ export async function sessionForConversation(
   conversationId: string | null,
   title?: string
 ): Promise<string | null> {
+  if (conversationId && await conversationDeleted(conversationId)) return null;
   if (!conversationId) return initializeSessionForConversation(conversationId, title);
 
   const pending = sessionInitializations.get(conversationId);
@@ -237,7 +244,7 @@ export async function sessionForConversation(
  * the existing log exactly as if the page had just reported an observation.
  */
 export async function restoreRecordedConversation(conversationId: string, pageObservedAt = Date.now()): Promise<string | null> {
-  if (!recordingEnabled() || !conversationId) return null;
+  if (!recordingEnabled() || !conversationId || await conversationDeleted(conversationId)) return null;
   const existing = conversations.get(conversationId);
   const known = existing ? await getSession(existing.sessionId) : await findSessionByConversation(conversationId);
   if (!known) return null;
@@ -1654,6 +1661,7 @@ function agentConversation(agent: string): string | null {
  * into the other's raw history, and nothing downstream could tell that had happened.
  */
 async function targetSession(target: Target): Promise<string | null> {
+  if (target.conversationId && await conversationDeleted(target.conversationId)) return null;
   if (target.attribution === 'superseded') return ensureUnattributedSession();
   if (target.conversationId) {
     if (target.sessionId) {
@@ -1923,7 +1931,7 @@ export async function recordRequestEvidence(
   conversationId: string,
   observations: readonly ChatObservation[]
 ): Promise<string | null> {
-  if (!recordingEnabled()) return null;
+  if (!recordingEnabled() || await conversationDeleted(conversationId)) return null;
   const lineage = !conversations.has(conversationId) ? await supersededLineage(conversationId) : null;
   const sessionId = lineage ?? await sessionForConversation(conversationId, observationTitle(observations));
   if (!sessionId) return null;
@@ -2064,7 +2072,7 @@ async function recordChatObservationsNow(
   goalCandidates: Array<{ replyId: string; turnId: string; eventSeq: number }>;
 }> {
   const activity: { meaningful: boolean; working: boolean; terminal: boolean; at?: number; startedAt?: number; endedTurnId?: string } = { meaningful: false, working: false, terminal: false };
-  if (!recordingEnabled()) return { sessionId: null, stored: 0, activity, goalCandidates: [] };
+  if (!recordingEnabled() || await conversationDeleted(conversationId)) return { sessionId: null, stored: 0, activity, goalCandidates: [] };
   // A status-only packet must not create a session or resurrect a cold turn.
   if (observations.length && observations.every(item => item.kind === 'activity_status') && !conversations.has(conversationId))
     return { sessionId: null, stored: 0, activity, goalCandidates: [] };
@@ -2665,13 +2673,13 @@ export function rebindConversation(sessionId: string, fromConversationId: string
 }
 
 /**
- * Detaches a session from everything still pointing at it, before it is deleted.
+ * Detaches a removed recording from everything still pointing at it.
  *
  * Deleting a session whose ChatGPT tab is still open used to leave the conversation
  * mapped to a folder that no longer existed, so the next observation from that tab
  * appended into nothing and recording for that chat silently stopped. Forgetting the
- * mapping means the next event starts a fresh session instead, which is the only
- * outcome that keeps recording alive.
+ * mapping permits a later observation to create a complete new local recording.
+ * Confirmed provider deletions remain suppressed by their separate durable receipt.
  */
 export function forgetSession(sessionId: string): string[] {
   const affected: string[] = [];
@@ -2683,9 +2691,23 @@ export function forgetSession(sessionId: string): string[] {
   if (unattributedSessionId === sessionId) unattributedSessionId = null;
   if (lastActiveSessionId === sessionId) lastActiveSessionId = null;
   if (affected.length > 0) {
-    logInfo(`session ${sessionId} deleted while live; ${affected.length} conversation(s) will start a new session`);
+    logInfo(`session ${sessionId} deleted while live; detached ${affected.length} conversation(s)`);
   }
   return affected;
+}
+
+/** Use the existing transcript/tool queues, not a racing remove beside the writer.
+ * The caller has separately confirmed remote deletion where requested. */
+export function deleteRecordingAfterDrain(sessionId: string, conversationId: string | null,
+  validate: () => Promise<void>): Promise<void> {
+  return serializeObservations(conversationId ?? `local:${sessionId}`, () =>
+    serializeRecording(sessionRecordings, sessionId, async () => {
+      if (conversationId) await sessionInitializations.get(conversationId);
+      await validate();
+      await deleteSession(sessionId);
+      forgetSession(sessionId);
+      notifyChanged();
+    }));
 }
 
 /** Rough token estimate for a session, from the text actually stored. */
@@ -2700,6 +2722,7 @@ export function estimate(text: string): number {
 
 /** Test seam. */
 export function resetRecorderForTests(): void {
+  resetDeletedConversationsForTests();
   resetCorrelationRegistryForTests();
   conversations.clear();
   observationChains.clear();

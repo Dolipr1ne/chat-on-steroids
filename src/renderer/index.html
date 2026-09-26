@@ -6,6 +6,7 @@
     <link rel="stylesheet" href="./styles.css" />
     <link rel="stylesheet" href="./dictation.css" />
     <link rel="stylesheet" href="./action-details.css" />
+    <link rel="stylesheet" href="./tool-access.css" />
   </head>
   <body>
     <!-- Icon sprite. Inline so there is no request and no font, and every glyph
@@ -341,12 +342,14 @@
               <h2>
                 Permissions
                 <span class="acts">
+                  <button class="btn" id="fullAccessBtn" type="button">Local tool access</button>
                   <button class="btn" id="readOnlyBtn" type="button">
                     <svg class="ico" viewBox="0 0 24 24"><use href="#i-lock" /></svg>Read-only
                   </button>
                 </span>
               </h2>
               <div class="scroll">
+                <p class="muted" id="localAccessScope">Local permissions apply to ordinary chats and projects. ChatGPT approvals are separate; blocked chats and approved folders remain protected.</p>
                 <div id="groups"></div>
                 <div class="desktop-access" id="desktopAccess" hidden>
                   <strong id="desktopAccessTitle">Desktop access needs attention</strong>
@@ -989,6 +992,7 @@
                   <details class="composer-menu" id="composerSettings">
                     <summary aria-label="Chat options" title="Chat options"><svg class="ico" viewBox="0 0 24 24"><use href="#i-gear" /></svg></summary>
                     <div class="composer-popover">
+                      <button id="composerToolAccess" type="button"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-lock" /></svg>Local tool access</button>
                       <div class="automation-switch" id="automationSwitch" role="radiogroup" aria-label="Chat mode">
                         <button type="button" role="radio" aria-checked="true" data-mode="off" data-keep-menu="true">Off</button>
                         <button type="button" role="radio" aria-checked="false" data-mode="goal" data-keep-menu="true">Goal</button>

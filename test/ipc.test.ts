@@ -8,6 +8,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import { EventEmitter } from 'node:events';
 
 type Handler = (event: unknown, payload: unknown) => Promise<unknown>;
 const handlers = new Map<string, Handler>();
@@ -19,7 +20,8 @@ vi.mock('electron', () => ({
   },
   BrowserWindow: class {},
   clipboard: { readText: () => '', writeText: () => undefined },
-  dialog: { showOpenDialog: vi.fn(async () => ({ canceled: true, filePaths: [] as string[] })) },
+  dialog: { showOpenDialog: vi.fn(async () => ({ canceled: true, filePaths: [] as string[] })),
+    showMessageBox: vi.fn(async () => ({ response: 0, checkboxChecked: false })) },
   shell: { openExternal: vi.fn(async () => undefined), openPath: vi.fn(async () => '') },
   nativeTheme: { themeSource: 'system' },
   safeStorage: {
@@ -28,7 +30,7 @@ vi.mock('electron', () => ({
     encryptStringAsync: vi.fn(async (value: string) => Buffer.from(value, 'utf8')),
     decryptStringAsync: vi.fn(async (buffer: Buffer) => ({ result: buffer.toString('utf8'), shouldReEncrypt: false }))
   },
-  app: { on: vi.fn(), getPath: () => '', getVersion: vi.fn(() => '0.0.0'), getAppPath: () => process.cwd(), isPackaged: false }
+  app: { on: vi.fn(), removeListener: vi.fn(), getPath: () => '', getVersion: vi.fn(() => '0.0.0'), getAppPath: () => process.cwd(), isPackaged: false }
 }));
 
 // This suite owns IPC behavior, not Electron's packaged-vs-checkout path discovery.
@@ -1230,10 +1232,38 @@ describe('session IPC contracts', () => {
     await handlers.get('sessions:block')!(null, { id: session.id, blocked: true });
     expect(isChatBlocked(conversationId)).toBe(true);
 
-    const deleted = (await handlers.get('sessions:delete')!(null, { id: session.id })) as any;
+    const owner = Object.assign(new EventEmitter(), { mainFrame: { url: 'file:///app/index.html' }, isDestroyed: () => false, send: vi.fn() });
+    currentWindow = Object.assign(new EventEmitter(), { setBackgroundColor: vi.fn(), setTitleBarOverlay: vi.fn(), isDestroyed: () => false, isVisible: () => true, isFocused: () => true, webContents: owner });
+    vi.mocked(dialog.showMessageBox).mockResolvedValueOnce({ response: 1, checkboxChecked: false });
+    const deleted = (await handlers.get('sessions:delete')!({ sender: owner, senderFrame: owner.mainFrame }, { id: session.id })) as any;
     expect(deleted.ok, deleted.error).toBe(true);
     // Otherwise the conversation stays refused with nothing left in the app to release it.
     expect(isChatBlocked(conversationId)).toBe(false);
+  });
+
+  it('keeps the recording when deletion is cancelled or called from the wrong frame', async () => {
+    const store = await import('../src/main/session/store.js');
+    const session = await createSession({ title: 'Keep this local recording', conversationId: null });
+    const owner = Object.assign(new EventEmitter(), { mainFrame: { url: 'file:///app/index.html' }, isDestroyed: () => false, send: vi.fn() });
+    currentWindow = Object.assign(new EventEmitter(), { setBackgroundColor: vi.fn(), setTitleBarOverlay: vi.fn(), isDestroyed: () => false, isVisible: () => true, isFocused: () => true, webContents: owner });
+    const call = (frame: unknown) => handlers.get('sessions:delete')!({ sender: owner, senderFrame: frame }, { id: session.id });
+    expect(await call({})).toMatchObject({ ok: false });
+    vi.mocked(dialog.showMessageBox).mockResolvedValueOnce({ response: 0, checkboxChecked: false });
+    expect(await call(owner.mainFrame)).toMatchObject({ ok: true, data: false });
+    expect(await store.getSession(session.id)).not.toBeNull();
+  });
+
+  it('a reloaded main document cannot spend its earlier deletion confirmation', async () => {
+    const store = await import('../src/main/session/store.js');
+    const session = await createSession({ title: 'Retain after reload', conversationId: null });
+    const owner = Object.assign(new EventEmitter(), { mainFrame: { url: 'file:///app/index.html' }, isDestroyed: () => false, send: vi.fn() });
+    currentWindow = Object.assign(new EventEmitter(), { setBackgroundColor: vi.fn(), setTitleBarOverlay: vi.fn(), isDestroyed: () => false, isVisible: () => true, isFocused: () => true, webContents: owner });
+    vi.mocked(dialog.showMessageBox).mockImplementationOnce(async () => {
+      owner.emit('did-start-loading'); return { response: 1, checkboxChecked: false };
+    });
+    expect(await handlers.get('sessions:delete')!({ sender: owner, senderFrame: owner.mainFrame }, { id: session.id })).toMatchObject({ ok: false });
+    expect(await store.getSession(session.id)).not.toBeNull();
+    expect(owner.listenerCount('did-start-loading')).toBe(0);
   });
 
   it('reports the blocked set with every session list, so one paint marks every row', async () => {

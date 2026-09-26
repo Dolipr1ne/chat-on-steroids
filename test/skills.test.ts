@@ -195,7 +195,7 @@ describe('managed Skills store', () => {
     await expect(readSkill('shared-review')).rejects.toThrow(/not found/i);
   });
 
-  it('never opens an unapproved target when a linked package is retargeted mid-scan', async () => {
+  it.each([false, true])('never opens an unapproved target when a linked package is retargeted mid-scan (unchanged root metadata=%s)', async stableRootMetadata => {
     const approved = path.join(userData, 'approved-race');
     const approvedPackage = path.join(approved, 'race-review');
     const unapprovedPackage = path.join(userData, 'unapproved-race', 'race-review');
@@ -207,15 +207,22 @@ describe('managed Skills store', () => {
     await fs.symlink(approvedPackage, link, process.platform === 'win32' ? 'junction' : 'dir');
     const previous = getConfig();
     await saveConfig({ ...previous, roots: [{ name: 'approved-race', path: approved }] });
+    expect(await listSkills()).toHaveLength(1);
 
     const originalLstat = rawFs.lstat.bind(rawFs);
     const originalOpen = rawFs.open.bind(rawFs);
+    const managedRoot = path.resolve(path.join(userData, 'skills'));
+    const managedRootStat = await originalLstat(managedRoot);
     const aliasFile = path.resolve(path.join(link, 'SKILL.md'));
     const maliciousFile = path.resolve(path.join(unapprovedPackage, 'SKILL.md'));
     const opened: string[] = [];
     let retargeted = false;
     const lstatSpy = vi.spyOn(rawFs, 'lstat').mockImplementation((async (target: Parameters<typeof rawFs.lstat>[0], ...args: unknown[]) => {
       const candidate = path.resolve(String(target));
+      const sameRoot = process.platform === 'win32' ? candidate.toLowerCase() === managedRoot.toLowerCase() : candidate === managedRoot;
+      // A directory's timestamps are not the linked package's identity. Model a
+      // filesystem that has not yet exposed a changed containing-directory stat.
+      if (stableRootMetadata && sameRoot) return managedRootStat;
       const same = process.platform === 'win32'
         ? candidate.toLowerCase() === aliasFile.toLowerCase()
         : candidate === aliasFile;
@@ -233,6 +240,7 @@ describe('managed Skills store', () => {
     try {
       await expect(listSkills()).rejects.toThrow(/managed Skills folder changed/i);
       expect(retargeted).toBe(true);
+      expect(skillCatalogInstructions()).toContain('race-review');
       expect(opened.some(file => process.platform === 'win32'
         ? file.toLowerCase() === maliciousFile.toLowerCase()
         : file === maliciousFile)).toBe(false);

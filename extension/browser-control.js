@@ -1,5 +1,6 @@
 import { browserPage, boundedBrowserValue, browserFramePoint } from './browser-control-page.js';
 import { openRecordedReferencePage } from './recorded-reference-page.js';
+import { deleteConversationPage, nativeDeletionReceiptPage } from './delete-conversation-page.js';
 
 /** One browser-lifetime tab custodian. No selected-tab fallback and no action replay. */
 export function createBrowserControl(chrome, transport, protectedTab = () => false) {
@@ -476,8 +477,48 @@ export function createBrowserControl(chrome, transport, protectedTab = () => fal
   async function execute(command) {
     if (command.epoch !== epoch || command.expiresAt <= Date.now()) error('BROWSER_EXPIRED: no operation dispatched.');
     const {tool,args} = command;
-    const writes = ['browser_action','browser_navigate','browser_evaluate','open_recorded_reference'].includes(tool) || tool === 'browser_tabs' && ['new','close'].includes(args.action);
+    const writes = ['browser_action','browser_navigate','browser_evaluate','open_recorded_reference','delete_recorded_conversation'].includes(tool) || tool === 'browser_tabs' && ['new','close'].includes(args.action);
     if (!(writes ? policy.write : policy.read)) error('BROWSER_PERMISSION_REVOKED');
+    if (tool === 'delete_recorded_conversation') {
+      if (!command.owner.startsWith('ui-delete:') || args.conversationId !== command.conversationId ||
+          !/^[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12}$/i.test(args.conversationId || '')) error('BROWSER_DELETE_INVALID');
+      await authorize(command);
+      const matching = (await chrome.tabs.query({url:['https://chatgpt.com/*','https://chat.openai.com/*']})).filter(tab => {
+        try { return new URL(tab.url).pathname.replace(/\/$/,'') === '/c/' + args.conversationId ||
+          new RegExp('^/g/[^/]+/c/' + args.conversationId + '/?$').test(new URL(tab.url).pathname); } catch { return false; }
+      });
+      if (matching.length > 1) error('BROWSER_DELETE_AMBIGUOUS: close duplicate copies of this chat before deletion.');
+      const tab = matching[0] || await chrome.tabs.create({url:'https://chatgpt.com/c/'+args.conversationId,active:true});
+      if (!matching.length) await waitForCreatedDocument(tab.id,'https://chatgpt.com/c/'+args.conversationId,command);
+      await authorize(command);
+      await chrome.tabs.update(tab.id,{active:true});
+      const window = await chrome.windows.get(tab.windowId);
+      await chrome.windows.update(tab.windowId,{...(window.state==='minimized'?{state:'normal'}:{}),focused:true});
+      const request = {...args,operationId:command.id,expiresAt:command.expiresAt};
+      let documentId;
+      try {
+        const prepared = await chrome.scripting.executeScript({target:{tabId:tab.id},world:'ISOLATED',func:deleteConversationPage,args:[{...request,phase:'prepare'}]});
+        documentId = prepared[0]?.documentId;
+        if (!documentId || prepared[0]?.result?.ready !== true) return {value:prepared[0]?.result || {deleted:false}};
+        await authorize(command);
+        const target = {tabId:tab.id,documentIds:[documentId]};
+        const armed = await chrome.scripting.executeScript({target,world:'MAIN',func:nativeDeletionReceiptPage,args:[{...request,phase:'arm'}]});
+        if (armed[0]?.result?.armed !== true) return {value:{deleted:false}};
+        await authorize(command);
+        const dispatch = await chrome.scripting.executeScript({target,world:'ISOLATED',func:deleteConversationPage,args:[{...request,phase:'confirm'}]});
+        if (dispatch[0]?.result?.dispatched !== true) return {value:dispatch[0]?.result || {deleted:false}};
+        const receipt = await chrome.scripting.executeScript({target,world:'MAIN',func:nativeDeletionReceiptPage,args:[{...request,phase:'read'}]});
+        return {value:receipt[0]?.result || {deleted:false}};
+      } finally {
+        if (documentId) {
+          const target = {tabId:tab.id,documentIds:[documentId]};
+          await Promise.all([
+            chrome.scripting.executeScript({target,world:'MAIN',func:nativeDeletionReceiptPage,args:[{...request,phase:'dispose'}]}).catch(()=>{}),
+            chrome.scripting.executeScript({target,world:'ISOLATED',func:deleteConversationPage,args:[{...request,phase:'cancel'}]}).catch(()=>{})
+          ]);
+        }
+      }
+    }
     if (tool === 'open_recorded_reference') {
       if (!command.owner.startsWith('ui-reference:') || args.conversationId !== command.conversationId ||
           !/^[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12}$/i.test(args.conversationId || '')) error('BROWSER_REFERENCE_INVALID');

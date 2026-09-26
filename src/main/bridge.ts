@@ -102,6 +102,7 @@ import {
   recordProgress,
   restoreRecordedConversation,
   setCallAttributionListener,
+  notifySessionActivityChanged,
   type ChatObservation,
   type PageCallEvidence
 } from './session/recorder.js';
@@ -2764,6 +2765,10 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         recordedTurnId: live.activeTurnId ?? null,
         activityCaption: live.activityCaption ?? null,
         recordedQuestionId: live.activeTurnId ? summary?.timelineTurns?.[live.activeTurnId]?.questionId ?? null : null,
+        // The click ACK retires dispatch, while the original receipt deadline
+        // still fences recovery until native completion or expiration.
+        stopPending: !!live.activeTurnId && !superseded && summary?.conversationId === id &&
+          summary.activeTurnId === live.activeTurnId && stopRequestedFor(id, live.activeTurnId),
         ...(pendingStop?.spec.type === 'stop' ? { stopTurn: { turnId: pendingStop.spec.turnId, userMessageId: pendingStop.spec.userMessageId ?? null } } : {}),
         // A revival names an existing worker conversation. The extension, which alone can
         // inspect Chrome's real tab set, routes it to that tab before it considers opening one.
@@ -6088,14 +6093,17 @@ async function restoreReturnedPageActivity(conversationId: string, sessionId: st
 
 /** A real terminal — stable final answer, explicit stop, worker finish — spends the deadline. */
 function endActivity(conversationId: string): void {
-  activeUntil.delete(conversationId);
+  const retired = activeUntil.delete(conversationId);
   armSilenceSweep();
+  // The completion read can outlive the earlier recorded-row notification.
+  // Publish this retired projection too, rather than leaving the sidebar on
+  // its pre-completion deadline until another message happens to arrive.
+  if (retired) notifySessionActivityChanged();
 }
 
 /** Drops a chat out of the activity ledger entirely, once nothing is waiting on it. */
 function forgetActivity(conversationId: string): void {
-  activeUntil.delete(conversationId);
-  armSilenceSweep();
+  endActivity(conversationId);
 }
 
 /**
@@ -7665,14 +7673,16 @@ function noteCallAttribution(
       armSilenceSweep();
       return;
     }
+    // A finish result belongs to its invocation, not whichever turn happens to
+    // be current when that result finally reaches the recorder.
+    const callOwner = recordedRequestTurn(filedSession?.requestTurns, requestId, conversationId);
+    if (callOwner && filedSession?.activeTurnId && responseTurnId(filedSession.timelineTurns, callOwner.turnId) !==
+        responseTurnId(filedSession.timelineTurns, filedSession.activeTurnId)) return;
     if (endsActivity) {
       endActivity(conversationId);
       repairsInFlight.delete(conversationId);
       return;
     }
-    const callOwner = recordedRequestTurn(filedSession?.requestTurns, requestId, conversationId);
-    if (callOwner && filedSession?.activeTurnId && responseTurnId(filedSession.timelineTurns, callOwner.turnId) !==
-        responseTurnId(filedSession.timelineTurns, filedSession.activeTurnId)) return;
     // The canonical completion reader has checked the newly committed call too.
     // Do not override its verdict with another timestamp rule: a native final may
     // settle an exact request that still delivers trailing connector work.

@@ -4,7 +4,7 @@ export const BROWSER_WRITE_TOOLS = ['browser_navigate', 'browser_action', 'brows
 export const BROWSER_TOOLS = [...BROWSER_READ_TOOLS, ...BROWSER_WRITE_TOOLS] as const;
 export type BrowserTool = (typeof BROWSER_TOOLS)[number];
 /** Fixed desktop-UI gesture, deliberately absent from the public MCP tool catalogue. */
-export type BrowserOperation = BrowserTool | 'open_recorded_reference';
+export type BrowserOperation = BrowserTool | 'open_recorded_reference' | 'delete_recorded_conversation';
 
 export const BROWSER_LIMITS = {
   clients: 8, pending: 32, timeoutMs: 25_000, presenceMs: 75_000,

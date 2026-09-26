@@ -2020,6 +2020,17 @@ it('keeps mixed tool and agent activity in one latest-action disclosure between 
   expect(timeline.children[0]!.className).toContain('ev-progress');
 });
 
+it('a cancelled deletion receipt keeps the selected conversation and its sidebar row', async () => {
+  const { w } = await boot([{ seq: 1, time: T0, source: 'extension', kind: 'user_message', messageId: 'keep-question', message: text('Keep this conversation') }]);
+  const remove = w.document.querySelector<HTMLButtonElement>('.sess-del')!;
+  expect(remove).not.toBeNull();
+  const api = (w as any).api; api.deleteSession = vi.fn(async () => ({ ok: true, data: false }));
+  remove.click(); await settle();
+  expect(api.deleteSession).toHaveBeenCalledExactlyOnceWith(summary([]).id);
+  expect(remove.isConnected).toBe(true);
+  expect(w.document.getElementById('timeline')!.textContent).toContain('Keep this conversation');
+});
+
 it('controls the selected session without submitting another user message', async () => {
   const { w, live } = await boot([]);
   const mode = w.document.getElementById('chatAutomation') as HTMLSelectElement;
@@ -2151,6 +2162,26 @@ it('updates native work captions without timeline duplication and keeps Stop pen
   expect(w.document.getElementById('chatSend')!.getAttribute('aria-label')).toBe('Send message');
 });
 
+
+it('distinguishes a stopped page from retained local activity without granting another Stop or Send', async () => {
+  const rows: SessionEvent[] = [
+    { seq: 1, time: T0, source: 'extension', kind: 'turn_start', turnId: 'held-turn' },
+    { seq: 2, time: T0 + 4000, source: 'extension', kind: 'turn_end', turnId: 'held-turn', outcome: 'stopped' }
+  ];
+  const current = { ...summary(rows), activityExpiresAt: Date.now() + 60_000 };
+  const { w, append } = await boot(rows, true, [], [], { sessions: [current] });
+  const api = (w as any).api;
+  api.getSessionControls = async () => ({ ok: true, data: { sessionId: current.id, conversationId: current.conversationId,
+    automation: 'off', activeTurnId: null, stopPending: false, finishHeld: false, canInject: false, blocked: '', job: null } });
+  await append([]);
+  expect(w.document.getElementById('chatState')!.textContent).toBe('Recent activity · completion not confirmed');
+  expect(w.document.getElementById('chatState')!.classList.contains('is-working')).toBe(true);
+  expect(w.document.getElementById('chatSend')!.getAttribute('aria-label')).toBe('Send message');
+  current.activityExpiresAt = null as any;
+  await append([]);
+  expect(w.document.getElementById('chatState')!.textContent).toMatch(/^Stopped/);
+  expect(w.document.getElementById('chatState')!.classList.contains('is-working')).toBe(false);
+});
 
 it('stops directly from the empty composer without a second Stop menu action', async () => {
   const { w } = await boot([]);

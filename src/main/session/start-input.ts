@@ -5,10 +5,6 @@ import { wakeBrowserUrl, resetBrowserStartupForTests } from '../browser-startup.
 import { getConfig } from '../config.js';
 import { enqueueInput, cancelInput, listInputs, noteInputStartupError, type InputArgs, type InputEntry } from './input.js';
 
-function wakeBrowser(entry: InputEntry, retry = false): Promise<void> {
-  const marker = `cos-input=${encodeURIComponent(entry.id)}`;
-  return wakeBrowserUrl(entry.conversationId ? `https://chatgpt.com/c/${encodeURIComponent(entry.conversationId)}` : `https://chatgpt.com/?${marker}#${marker}`, retry, getConfig().ui.backgroundChats === true);
-}
 async function ready(signal?: AbortSignal): Promise<void> {
   await connect();
   signal?.throwIfAborted();
@@ -33,11 +29,28 @@ async function ready(signal?: AbortSignal): Promise<void> {
   if (!await startBridge()) throw new Error('The browser bridge could not start.');
   signal?.throwIfAborted();
 }
-async function deliver(entry: InputEntry, retry = false): Promise<InputEntry> {
+async function deliver(entry: InputEntry, controller: AbortController, retry = false): Promise<InputEntry | null> {
+  const { id, sessionId, conversationId } = entry;
+  const live = () => !stopped && !controller.signal.aborted && starting.get(id) === controller;
+  const current = async (): Promise<boolean> => {
+    if (!live()) return false;
+    const row = (await listInputs()).find(value => value.id === id);
+    // The process probe and this outbox read both yield. Cancellation, claim and
+    // rebind must retire the old URL before the OS handoff, including on retry.
+    return live() && !!row && row.state === 'queued' && row.owner === null && row.sendAuthorizedAt === undefined &&
+      row.sessionId === sessionId && row.conversationId === conversationId && row.purpose !== 'decision' &&
+      row.transportIntent !== 'tool' && row.attachmentDelivery !== 'tool';
+  };
   try {
-    await wakeBrowser(entry, retry);
+    const marker = `cos-input=${encodeURIComponent(id)}`;
+    await wakeBrowserUrl(conversationId ? `https://chatgpt.com/c/${encodeURIComponent(conversationId)}` : `https://chatgpt.com/?${marker}#${marker}`,
+      retry, getConfig().ui.backgroundChats === true, {
+        current, allowRunning: (entry.requestedMode ?? entry.mode) === 'auto' && entry.dueAt <= Date.now()
+      });
+    if (!await current()) return null;
     return await noteInputStartupError(entry.id, null) ?? entry;
   } catch (error) {
+    if (!await current()) return null;
     return await noteInputStartupError(entry.id, `Message queued. Browser startup failed: ${(error as Error).message}`) ?? entry;
   }
 }
@@ -55,7 +68,7 @@ async function startAcceptedInput(entry: InputEntry, controller: AbortController
     controller.signal.throwIfAborted();
     const current = (await listInputs()).find(row => row.id === entry.id);
     controller.signal.throwIfAborted();
-    if (current?.state === 'queued') await deliver(current);
+    if (current?.state === 'queued') await deliver(current, controller);
   } catch (error) {
     if (!controller.signal.aborted) await noteInputStartupError(entry.id,
       'Message queued. Browser startup failed: ' + (error as Error).message);
@@ -68,9 +81,12 @@ export async function sendDesktopInput(input: InputArgs): Promise<InputEntry> {
   if (input.mode === 'finish' || starting.has(input.id)) return enqueueInput(input);
   const controller = new AbortController(); starting.set(input.id, controller);
   try {
+    // Replaying durable admission is not a new user opening, even after restart
+    // forgets transient startup state. A known startup failure has its own retry action.
+    const accepted = (await listInputs()).some(row => row.id === input.id);
     const entry = await enqueueInput(input);
     if (controller.signal.aborted) { await cancelInput(input.id); controller.signal.throwIfAborted(); }
-    if (entry.state !== 'queued' || entry.transportIntent === 'tool' || entry.attachmentDelivery === 'tool') {
+    if (accepted || entry.state !== 'queued' || entry.transportIntent === 'tool' || entry.attachmentDelivery === 'tool') {
       starting.delete(input.id); return entry;
     }
     // Return after durable admission, not after connection startup or native delivery.
@@ -97,7 +113,7 @@ export async function retryQueuedInputBrowser(id: string): Promise<InputEntry | 
     await ready(controller.signal);
     const entry = (await listInputs()).find(row => row.id === id);
     controller.signal.throwIfAborted();
-    return entry?.state === 'queued' ? await deliver(entry, true) : null;
+    return entry?.state === 'queued' ? await deliver(entry, controller, true) : null;
   } catch (error) {
     if (controller.signal.aborted) return null;
     return await noteInputStartupError(id, 'Message queued. Browser startup failed: ' + (error as Error).message);

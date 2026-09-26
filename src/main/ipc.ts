@@ -1,4 +1,6 @@
 import { registerWorkspaceTerminalIpc } from './workspace-terminal-ipc.js';
+import { requestSessionDeletion } from './session/deletion.js';
+import { registerToolAccessIpc } from './tool-access.js';
 import { openRecordedReference } from './session/message-reference.js';
 import { applyLoginStartup, supportsLoginStartup } from './window-lifecycle.js';
 import { appearanceSchema } from './appearance-schema.js';
@@ -37,7 +39,7 @@ import { registerPluginIpc } from './plugins-ipc.js';
  * key but can never read it back.
  */
 
-import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeTheme, shell } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeTheme, shell, type IpcMainInvokeEvent } from 'electron';
 import { z } from 'zod';
 import {
   CAPABILITIES,
@@ -85,7 +87,6 @@ import {
 import { extensionDir } from './extension-path.js';
 import { extensionDownloadUrl } from './version.js';
 import {
-  deleteSession,
   clearImageStorage,
   getSession,
   getImageStorage,
@@ -95,7 +96,7 @@ import {
   readRecentEvents,
   readHandoff
 } from './session/store.js';
-import { activeSessionId, forgetSession, onSessionChange } from './session/recorder.js';
+import { activeSessionId, onSessionChange } from './session/recorder.js';
 import { blockedChatIds, setChatBlocked } from './session/blocked-chats.js';
 import {
   clearAgent,
@@ -396,10 +397,10 @@ async function buildState(): Promise<AppState> {
 }
 
 /** Wraps a handler so a thrown error becomes a message the UI can show. */
-function handle<T>(channel: string, fn: (payload: unknown) => Promise<T>): void {
-  ipcMain.handle(channel, async (_event, payload: unknown) => {
+function handle<T>(channel: string, fn: (payload: unknown, event: IpcMainInvokeEvent) => Promise<T>): void {
+  ipcMain.handle(channel, async (event, payload: unknown) => {
     try {
-      return { ok: true as const, data: await fn(payload) };
+      return { ok: true as const, data: await fn(payload, event) };
     } catch (err) {
       const message =
         err instanceof SandboxError || err instanceof z.ZodError
@@ -416,6 +417,13 @@ function handle<T>(channel: string, fn: (payload: unknown) => Promise<T>): void 
 
 export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall: () => void): void {
   registerWorkspaceTerminalIpc(getWindow);
+  registerToolAccessIpc(getWindow, async (next, previous) => {
+    if (JSON.stringify(effectiveCapabilities(previous)) !== JSON.stringify(effectiveCapabilities(next))) forgetExposedSurface();
+    if (browserExtensionRequired(next)) await startBridge();
+    wakeBrowserWork('browser-control');
+    await applySettings();
+    logInfo('full local access enabled by explicit desktop confirmation');
+  });
   let watchedWindow: BrowserWindow | null = null;
   const projectFileWatches = new ProjectFileWatchSet(event => {
     const target = getWindow();
@@ -1048,25 +1056,39 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     return blockedChatIds();
   });
 
-  handle('sessions:delete', async (payload) => {
+  handle('sessions:delete', async (payload, event) => {
     const { id } = sessionIdArg.parse(payload);
-    // Detach first. The recorder maps live ChatGPT conversations to session ids, so
-    // deleting the folder underneath a live one left it appending to a session that no
-    // longer existed — the events went to a resurrected half-session with no summary.
-    // Forgetting the mapping makes the next observation open a fresh session instead.
-    const detached = forgetSession(id);
-    // Release first. The block button lives on this row, so a block left behind by the row's
-    // deletion would refuse that conversation's tools with nothing left in the app that could
-    // ever release it.
-    const summary = await getSession(id);
-    if (summary?.conversationId) setChatBlocked(summary.conversationId, false);
-    await deleteSession(id);
-    logInfo(
-      detached.length > 0
-        ? `session ${id} deleted; ${detached.length} live conversation(s) will start a new session`
-        : `session ${id} deleted`
-    );
-    return true;
+    const owner = getWindow();
+    if (!owner || owner.isDestroyed() || owner.webContents.isDestroyed() ||
+        !owner.isVisible() || !owner.isFocused() || event.sender !== owner.webContents || event.senderFrame !== owner.webContents.mainFrame)
+      throw new Error('Open CoS to delete a recorded conversation.');
+    const contents = owner.webContents, frame = contents.mainFrame, url = frame.url;
+    let retired = false;
+    const retire = () => { retired = true; };
+    const validate = () => {
+      if (retired || owner !== getWindow() || owner.isDestroyed() || contents.isDestroyed() || !owner.isVisible() ||
+          contents.mainFrame !== frame || frame.url !== url)
+        throw new Error('The application window changed during deletion confirmation.');
+    };
+    contents.on('did-start-loading', retire); contents.on('destroyed', retire);
+    owner.on('hide', retire); owner.on('closed', retire); app.on('before-quit', retire);
+    try {
+      return await requestSessionDeletion(id, async (summary, hasWebChat) => {
+        const result = await dialog.showMessageBox(owner, {
+          type: 'warning', title: 'Delete conversation', message: `Delete “${summary.title.slice(0, 120)}”?`,
+          detail: hasWebChat
+            ? 'Choose what to delete. Local-only removes this CoS recording but keeps ChatGPT; an open web chat can be recorded again. Delete from both also deletes the CURRENT ChatGPT conversation. Older conversations from Compact & Resume, project files, and Library files are not deleted. Deletion cannot be undone. Local history is kept if web deletion cannot be confirmed.'
+            : 'This removes the local CoS recording only. There is no current ChatGPT conversation attached. Project files and other conversations are not deleted.',
+          buttons: hasWebChat ? ['Cancel', 'Delete local recording only', 'Delete from CoS and ChatGPT'] : ['Cancel', 'Delete local recording only'],
+          defaultId: 0, cancelId: 0, noLink: true
+        });
+        validate();
+        return result.response === 1 ? 'local' : result.response === 2 && hasWebChat ? 'both' : null;
+      }, summary => sessionInputActivity(summary).possible, validate);
+    } finally {
+      contents.removeListener('did-start-loading', retire); contents.removeListener('destroyed', retire);
+      owner.removeListener('hide', retire); owner.removeListener('closed', retire); app.removeListener('before-quit', retire);
+    }
   });
 
   handle('handoff:get', async (payload) => {

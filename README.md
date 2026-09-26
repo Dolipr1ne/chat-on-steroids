@@ -64,6 +64,19 @@ Windows 10/11, **macOS 13 Ventura or newer**, or a current desktop Linux. Chrome
 
 ## Context, action details and dictation
 
+**Conversation deletion** offers separate **local recording only** and **CoS and ChatGPT** choices.
+Deleting from both targets the selected session's current ChatGPT conversation, not older chats
+used before Compact & Resume, project files, or files in the provider Library. CoS retains its
+local history when native deletion cannot be confirmed. Local-only removal does not delete the
+web chat; keeping that page open can record it again.
+
+**Local tool access**, available in Settings and Chat options, explains the current permissions
+for ordinary and project chats. **Enable full local access** requires explicit confirmation. It
+enables supported local capabilities and disables Read-only without changing approved folders,
+blocked chats, unattributed-call policy, automatic modes or microphone access. Commands run with
+your OS account's privileges outside the file-tool sandbox. ChatGPT approvals and OS permissions
+are separate; this is not a way to bypass them.
+
 **Compact & Resume** keeps the durable local session while moving work to a new ChatGPT
 conversation. The small context meter beside Chat options shows the local token estimate and
 links to **Automatic compaction settings**. The existing global switch and token threshold

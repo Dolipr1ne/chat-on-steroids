@@ -18886,6 +18886,35 @@ describe('the goal loop', () => {
 });
 
 describe('app Stop command uses current native turn proof', () => {
+  it.each(['empty', 'older-answer', 'answer-mounts', 'new-question'] as const)(
+    'stops the exact accepted question before its assistant section mounts (%s)', async scenario => {
+      live = await harness();
+      if (scenario === 'older-answer') {
+        userTurn(live.document, 'older-question', 'Earlier work', { sent: false });
+        assistantTurn(live.document, 'older-answer', []);
+        live.hook.observe(); await settle();
+      }
+      startGenerating(live.document);
+      live.hook.observe(); await settle(); await live.hook.flush();
+      const turnId = emitted(live.sent, 'turn_start').at(-1)!.event.turnId;
+      const userMessageId = emitted(live.sent, 'user_message').at(-1)!.event.messageId;
+      const conversationId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+      const redeem = vi.fn(() => {
+        if (scenario === 'answer-mounts') assistantTurn(live!.document, 'new-answer', []);
+        if (scenario === 'new-question') userTurn(live!.document, 'replacement-question', 'Different work');
+        return { ok: true, command: { type: 'stop', conversationId, turnId, userMessageId } };
+      });
+      live.reply.set('stop_redeem', redeem);
+      live.reply.set('stop_ack', () => ({ ok: true }));
+      const button = live.document.querySelector('[data-testid="stop-button"]') as HTMLButtonElement;
+      Object.defineProperty(button, 'getClientRects', { value: () => [{ width: 10, height: 10 }] });
+      const click = vi.fn(); button.addEventListener('click', click);
+      expect(await live.runtimeMessage({ type: 'clf-stop-turn', id: '1111111111111111', conversationId, turnId }))
+        .toEqual({ ok: scenario !== 'new-question' });
+      expect(redeem).toHaveBeenCalledOnce();
+      expect(click).toHaveBeenCalledTimes(scenario === 'new-question' ? 0 : 1);
+    });
+
   it('retains pending Stop adoption while its native question hydrates after the first activity reply', async () => {
     const conversationId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', turnId = 'late-stop-turn';
     live = await harness(undefined, {
@@ -18963,7 +18992,7 @@ describe('app Stop command uses current native turn proof', () => {
     expect(emitted(live!.sent, 'turn_end')).toEqual([]);
   });
 
-  it.each(['fresh', 'before-stop', 'foreign-turn', 'unattributed', 'finish', 'final'] as const)(
+  it.each(['fresh', 'before-stop', 'foreign-turn', 'unattributed', 'finish', 'final', 'pending-receipt'] as const)(
     'rechecks the stopped page against exact subsequent MCP work (%s)', async evidence => {
     const h = await setup();
     const stoppedAt = live!.window.Date.now();
@@ -18971,8 +19000,10 @@ describe('app Stop command uses current native turn proof', () => {
     expect(await live!.runtimeMessage({ type: 'clf-repair-check', conversationId: h.request.conversationId }))
       .toMatchObject({ safe: false });
     live!.advance(1000);
+    let stopPending = evidence === 'pending-receipt';
     live!.reply.set('activity', () => ({ ok: true, data: { entries: [], nextSince: 101,
       activeTurnId: evidence === 'final' ? null : h.request.turnId,
+      stopPending,
       pendingTools: 0, stream: [{ seq: 100, callId: 'continued-after-stop', kind: 'tool_call',
         turnId: evidence === 'foreign-turn' ? 'another-turn' : h.request.turnId,
         time: evidence === 'before-stop' ? stoppedAt - 1 : live!.window.Date.now(),
@@ -18983,6 +19014,14 @@ describe('app Stop command uses current native turn proof', () => {
       .toMatchObject({ safe: evidence === 'fresh' });
     expect(h.clicks()).toBe(1);
     expect(emitted(live!.sent, 'turn_end')).toEqual([]);
+    if (evidence === 'pending-receipt') {
+      // The original receipt expires. The same already-observed subsequent call
+      // still disproves cancellation; no second call or reloaded page is needed.
+      stopPending = false;
+      await live!.hook.pullActivity();
+      expect(await live!.runtimeMessage({ type: 'clf-repair-check', conversationId: h.request.conversationId }))
+        .toMatchObject({ safe: true });
+    }
   });
 
   it('captures a completed final hydrated later in a hidden tab after the settle window', async () => {

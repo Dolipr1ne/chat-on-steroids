@@ -130,6 +130,27 @@ describe('browser-backed ChatGPT commands', () => {
     })).rejects.toThrow('Background browser launch failed');
     expect(launch).not.toHaveBeenCalled();
   });
+  it('does not repeat an unconfirmed Windows handoff in another installed browser candidate', async () => {
+    const powershell = vi.fn(async () => ({ stdout: '', stderr: '', exitCode: null, timedOut: true, truncated: false, durationMs: 10_000 }));
+    await expect(openInPreferredBrowser('https://chatgpt.com/?cos-input=owned', {
+      browser: 'chrome', platform: 'win32', backgroundStartup: true,
+      env: { LOCALAPPDATA: 'C:\\Local', ProgramFiles: 'C:\\Program Files' },
+      usable: () => true, powershell
+    })).rejects.toThrow();
+    // The wrapper may have handed the URL off before its reply timed out.
+    expect(powershell).toHaveBeenCalledTimes(1);
+  });
+
+  it('rechecks opening authority before falling through an awaited failed executable', async () => {
+    let current = true;
+    const launch = vi.fn(async () => { current = false; throw new Error('stale browser wrapper'); });
+    await expect(openInPreferredBrowser('https://chatgpt.com/?cos-input=owned', {
+      browser: 'chrome', platform: 'win32',
+      env: { LOCALAPPDATA: 'C:\\Local', ProgramFiles: 'C:\\Program Files' },
+      usable: () => true, launch, current: () => current
+    })).resolves.toBeNull();
+    expect(launch).toHaveBeenCalledTimes(1);
+  });
   it('prefers the normal per-user Chrome install on Windows', () => {
     const env = {
       LOCALAPPDATA: 'C:\\Users\\example\\AppData\\Local',

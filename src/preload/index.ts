@@ -1,4 +1,5 @@
 import type { WorkspaceTerminalEvent, WorkspaceTerminalInfo } from '../shared/workspace-terminal.js';
+import { TOOL_ACCESS_CHANNEL, FULL_LOCAL_ACCESS, type ToolAccessStatus, type ToolAccessResult } from '../shared/tool-access.js';
 import { DICTATION, type DictationAudio, type DictationEvent, type DictationStatus } from '../shared/dictation.js';
 import type { ChatModelCatalog } from '../shared/chat-models.js';
 import type { GoalModel } from '../shared/goal-reasoning.js';
@@ -83,6 +84,8 @@ export interface SessionDetail {
 }
 
 const api = {
+  toolAccessStatus: () => call<ToolAccessStatus>(TOOL_ACCESS_CHANNEL, { action: 'status' }),
+  applyToolAccessPreset: (preset: typeof FULL_LOCAL_ACCESS) => call<ToolAccessResult>(TOOL_ACCESS_CHANNEL, { action: 'apply', preset }),
   dictationStatus: () => call<DictationStatus>('dictation:request', { action: 'status' }),
   dictationSetKey: (value: string) => call<DictationStatus>('dictation:request', { action: 'key', value }),
   dictationBegin: (id: string) => call<void>('dictation:request', { action: 'begin', id }),

@@ -15,7 +15,7 @@ async function fixture(owner = 'A', protectedPage = true) {
     scripting:{executeScript:vi.fn(async(_args:unknown)=>[{frameId:0,documentId:String(randomUUID()),result:{text:'Visible update',refs:[],elements:0}}])},
     debugger:{attach:vi.fn(async()=>{}),detach:vi.fn(async()=>{}),sendCommand:vi.fn(async()=>({}))}
   };
-  const create = runInNewContext(`${source};createBrowserControl`, {browserPage:()=>{},openRecordedReferencePage:()=>{},crypto:{randomUUID},navigator:{userAgent:'Chrome'},setTimeout,clearTimeout,TextEncoder,URL});
+  const create = runInNewContext(`${source};createBrowserControl`, {browserPage:()=>{},openRecordedReferencePage:()=>{},deleteConversationPage:()=>{},nativeDeletionReceiptPage:()=>{},crypto:{randomUUID},navigator:{userAgent:'Chrome'},setTimeout,clearTimeout,TextEncoder,URL});
   const transport = vi.fn(async()=>({ok:true,data:{allowed:true,epoch:'epoch',policy:{read:true,write:true},requests:[]}}));
   const control = create(chrome,transport,()=>protectedPage);
   await control.pump();
@@ -25,6 +25,25 @@ async function fixture(owner = 'A', protectedPage = true) {
 afterEach(()=>vi.useRealTimers());
 
 describe('browser extension release custody',()=>{
+  it.each([false, true])('pins native deletion to one document and rechecks authority (revoked=%s)', async revoked => {
+    const { chrome, control, command, transport } = await fixture();
+    const conversationId = randomUUID(), tab = { id: 18, windowId: 1, url: `https://chatgpt.com/c/${conversationId}` };
+    Object.assign(chrome.tabs, { query: vi.fn(async () => [tab]), update: vi.fn(async () => tab), create: vi.fn() });
+    Object.assign(chrome, { windows: { get: vi.fn(async () => ({ state: 'normal' })), update: vi.fn(async () => ({})) } });
+    chrome.scripting.executeScript.mockImplementation(async (raw: any) => {
+      const phase = raw.args[0].phase;
+      if (phase === 'prepare' && revoked) transport.mockResolvedValue({ ok: true, data: { allowed: false, epoch: 'epoch', policy: { read: true, write: true }, requests: [] } });
+      return [{ frameId: 0, documentId: 'native-delete-document', result: phase === 'prepare' ? { ready: true } :
+        phase === 'arm' ? { armed: true } : phase === 'confirm' ? { dispatched: true } : phase === 'read' ? { deleted: true, conversationId } : {} }] as any;
+    });
+    const input = { ...command('list', 'ui-delete:session'), id: randomUUID(), conversationId, tool: 'delete_recorded_conversation', args: { conversationId } };
+    if (revoked) await expect(control.execute(input)).rejects.toThrow('PERMISSION_REVOKED');
+    else expect(await control.execute(input)).toMatchObject({ value: { deleted: true, conversationId } });
+    const calls = chrome.scripting.executeScript.mock.calls.map(call => call[0] as any);
+    expect(calls.filter(call => call.args[0].phase === 'confirm')).toHaveLength(revoked ? 0 : 1);
+    expect(calls.slice(1).every(call => call.target.documentIds?.[0] === 'native-delete-document')).toBe(true);
+    expect(chrome.debugger.attach).not.toHaveBeenCalled(); expect(chrome.debugger.detach).not.toHaveBeenCalled();
+  });
   it.each([false, true])('rechecks a UI-owned file preview after readiness without taking the debugger (revoked=%s)', async revoked => {
     const {chrome, control, command, transport} = await fixture();
     const conversationId = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';

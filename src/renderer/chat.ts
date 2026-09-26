@@ -424,7 +424,7 @@ function sessionRow(summary: SessionSummary): HTMLElement {
   const remove = document.createElement('button');
   remove.className = 'btn sess-action sess-del';
   remove.type = 'button';
-  ui(remove, 'title', () => t("Delete this recorded session"));
+  ui(remove, 'title', () => t("Delete conversation"));
   remove.append(icon('i-trash'));
   remove.addEventListener('click', (event) => {
     event.stopPropagation();
@@ -511,7 +511,7 @@ async function toggleSessionBlock(id: string, blocked: boolean): Promise<void> {
 
 async function deleteSession(id: string): Promise<void> {
   const done = await run(api.deleteSession(id));
-  if (done === null) return;
+  if (done !== true) return;
   sessions = sessions.filter((entry) => entry.id !== id);
   pressure.delete(id);
   sessionTotal = Math.max(0, sessionTotal - 1);
@@ -2796,8 +2796,12 @@ function stateLine(): { text: string; tone: '' | 'is-live' | 'is-bad'; working?:
     const summary = sessions.find(entry => entry.id === selectedId);
     if (!summary || detailFor !== selectedId) return { text: '', tone: '' };
     const active = controlledSessionId === selectedId && controlledSelection === selectionGeneration ? controlledTurnId : null;
-    if (active && controlledStopPending) return { text: t('Stop requested · waiting for ChatGPT'), tone: 'is-live', working: true };
+    const scoped = controlledSessionId === selectedId && controlledSelection === selectionGeneration;
+    if (scoped && controlledStopPending) return { text: t('Stop requested · waiting for ChatGPT'), tone: 'is-live', working: true };
     if (active && controlledActivityCaption) return { text: controlledActivityCaption, tone: 'is-live', working: true };
+    // Reuse the sidebar's recent-activity projection without presenting it as
+    // proof of current generation or permission to Stop, inject or send again.
+    if (!active && sessionWorking(summary)) return { text: t('Recent activity · completion not confirmed'), tone: 'is-live', working: true, ticking: true };
     const lastBoundary = [...events].reverse().find(event => event.kind === 'turn_start' || event.kind === 'turn_end');
     const turnId = active ?? lastBoundary?.turnId;
     if (!turnId) return { text: '', tone: '' };

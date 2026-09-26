@@ -1,0 +1,22 @@
+.tool-access-trigger { cursor: pointer; }
+.tool-access-dialog { color: var(--ink); background: var(--card); border: 1px solid var(--edge); border-radius: 20px; margin: auto; padding: 24px; width: min(560px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); box-sizing: border-box; overflow: auto; box-shadow: 0 24px 100px #0005; }
+.tool-access-dialog::backdrop { background: #0007; backdrop-filter: blur(4px); }
+.tool-access-dialog [hidden] { display: none !important; }
+.tool-access-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.tool-access-head h2 { margin: 0; font-size: 20px; font-weight: 600; }
+.tool-access-summary { margin-block: 18px 6px; font-size: 15px; font-weight: 600; }
+.tool-access-note, .tool-access-details { color: var(--soft); font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+.tool-access-note { margin-block: 10px; }
+.tool-access-details { border-block: 1px solid var(--edge); padding-block: 10px; }
+.tool-access-details summary { cursor: pointer; color: var(--ink); }
+.tool-access-details p { margin-block: 8px 0; }
+.tool-access-command { border-inline-start: 3px solid var(--accent); padding-inline-start: 12px; font-size: 12px; line-height: 1.6; }
+.tool-access-status { min-height: 20px; margin-block: 14px 0; font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+.tool-access-dialog[data-error="true"] .tool-access-status { color: var(--danger, #e37b7b); }
+.tool-access-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; margin-block-start: 16px; }
+.tool-access-button { border: 1px solid var(--edge); border-radius: 999px; background: transparent; color: var(--ink); padding: 9px 14px; font: inherit; font-size: 12px; white-space: normal; cursor: pointer; }
+.tool-access-button:hover { background: var(--hover); }
+.tool-access-button.is-primary { background: var(--accent-fill, var(--accent)); color: var(--on-accent, var(--page)); border-color: transparent; }
+.tool-access-button:disabled { opacity: .5; cursor: default; }
+.tool-access-dialog :focus-visible, .tool-access-trigger:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+@media (max-width: 520px) { .tool-access-dialog { padding: 18px; } .tool-access-actions { justify-content: stretch; } .tool-access-actions button { flex: 1 1 auto; } }
